@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Obsidian workspace state (machine-local)
+.obsidian/workspace*.json
+.obsidian/cache
+.obsidian/plugins/*/data.json
+.trash/
+
+# Local Images Plus auto-downloads (machine-local attachments)
+.resources/
+
+# Bootstrap runtime state
+.openbrain/.bootstrap-state
+
+# Claude Code settings — per-machine (absolute paths baked in at setup time)
+.claude/settings.json
+.claude/settings.local.json
+
+# Per-user customizations of CLAUDE.md after setup — NOT tracked in the template repo
+# (Users should commit their customized CLAUDE.md to their own private vault repo.)
+
