@@ -15,6 +15,8 @@ description: Assemble a briefing for a meeting or 1:1 — pulls the person note,
    - If `$1` matches a `+ Atlas/People/*.md` file (by title or alias in frontmatter), use that person.
    - Else if `$1` looks like a gcal event id, fetch it via the right `gcal_*` MCP and extract attendees.
    - Else fuzzy-search `gcal_list_events` across all `gcal_*` and `gmail_*` MCPs for the next 7 days matching `$1`; pick the best match and extract attendees.
+> **Parallelization:** step 1 (subject resolution) must run first because it decides which person notes to load. Once the subject is resolved, **steps 2–6 are all independent** — the person note read, interaction grep, project MOC reads, and `gmail_*` / `slack_*` thread fetches should be issued together in a single tool-use block.
+
 2. **Load person note(s).** Read `+ Atlas/People/<name>.md` for each resolved person. If missing for an attendee, flag as "no person note yet" and offer to run `/log-person` after the brief.
 3. **Recent interactions.** Grep `+ Atlas/Interactions/*.md` for wikilinks to the person. Read the 3 most recent by date.
 4. **Open commitments.** Extract from the person note's `## Open commitments` section and any unresolved `Follow-ups` from recent interactions.

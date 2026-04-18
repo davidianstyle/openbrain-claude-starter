@@ -15,7 +15,7 @@ Scan recent activity across all multi-account MCPs and Fathom, propose new perso
 ## Procedure
 
 1. **Resolve window.** Compute `since = today - lookback`.
-2. **Collect touchpoints across all accounts.**
+2. **Collect touchpoints across all accounts.** Fan out all four sources in a single tool-use block — every `gmail_*`, every `gcal_*`, every `slack_*`, and Fathom. All calls are independent and must run concurrently; never loop through accounts serially.
    - **Gmail** — for each `gmail_*` MCP, `gmail_search_messages` with `newer_than:<window>` scoped to inbox + sent. Extract `From`, `To`, `Cc` addresses and display names from each thread. Tag each touchpoint with account slug and date.
    - **Google Calendar** — for each `gcal_*` MCP, `gcal_list_events` over the window. Extract attendees (name + email, skip resource rooms and the account owner).
    - **Slack** — for each `slack_*` MCP, pull recent DMs and mentions via `conversations_history` / `conversations_search_messages`. Extract user ids; resolve to display names via `users_search` or profile lookups. Tag with workspace slug.
@@ -42,7 +42,25 @@ Scan recent activity across all multi-account MCPs and Fathom, propose new perso
    - A calendar event where the user is also an attendee (direct meeting = high signal), OR
    - A Slack DM (not a mention in a channel).
    Anything below threshold is logged but not staged.
-8. **Bucket A — update `last_contact`.** For each matched person, if the most-recent touchpoint date > current `last_contact`, update the frontmatter in place. In `interactive` mode, list the diffs and ask for confirmation; in `scheduled` mode, apply directly. Do **not** append to `## Threads` here — that's `/capture-meeting`'s job. A touchpoint is not a full interaction.
+8. **Bucket A — update `last_contact` + log interactions.** For each matched person, if the most-recent touchpoint date > current `last_contact`, update the frontmatter in place. In `interactive` mode, list the diffs and ask for confirmation; in `scheduled` mode, apply directly.
+
+   **Auto-log interactions from email/Slack.** For each email thread or Slack message involving a known person, create a lightweight interaction note if one doesn't already exist for that thread. Filtering rules:
+   - **Include:** direct emails where the user is in To or From (not CC-only), Slack DMs, Slack @mentions where the user is the target.
+   - **Exclude:** mailing lists, Google Groups, no-reply/bot addresses, automated notifications, CC-only threads, observer-only threads (per saved feedback).
+
+   Create the note at `+ Atlas/Interactions/YYYY-MM-DD-<kebab-slug>.md` using the Interaction template:
+   - `title`: email subject line or Slack thread topic
+   - `channel`: `email` or `slack`
+   - `people`: `[[wikilinks]]` to matched person notes
+   - `source`: gmail thread ID or slack permalink
+   - `## Summary`: first 2–3 sentences of the message body (auto-extracted, not invented)
+   - Other sections (`Decisions`, `Commitments`, `Follow-ups`, `Notes`) left as `-`
+
+   **Deduplication:** before creating, grep `+ Atlas/Interactions/` for `^source: <value>` in frontmatter. If an interaction note already exists with the same source (including richer notes from `/capture-meeting` or `/log-interaction`), skip creation. One interaction note per thread, not per message.
+
+   **Threads update:** for each person, collect all new interaction bullets from this run, then write them in a single edit to that person's `## Threads` section: `- <date> · [[interaction-note-title]] (<channel>) — <one-line gist>`. Batch per person — do not re-read and re-write the person note for each interaction.
+
+   In `interactive` mode, list proposed interaction notes and ask for confirmation. In `scheduled` mode, create them automatically (they are vault-local and non-destructive).
 9. **Bucket B — alias merges.** For each, propose an edit to the existing person's `emails:` / `slack:` / `aliases:` array. Always require confirmation, even in scheduled mode (merges are irreversible via this skill).
 10. **Bucket C — stage candidates.** For each unknown meeting the threshold, write a stub at `+ Inbox/people-candidates/<Full Name>.md`:
 
@@ -84,8 +102,9 @@ Scan recent activity across all multi-account MCPs and Fathom, propose new perso
     ```
 
     If a stub already exists in `+ Inbox/people-candidates/` for this person, **append** new evidence bullets rather than overwriting; update `last_contact` if newer.
-11. **Report.** Output a three-section summary:
+11. **Report.** Output a five-section summary:
     - **Updated (Bucket A)** — count + list of people whose `last_contact` advanced.
+    - **Interactions logged (Bucket A)** — list of auto-created interaction notes from email/Slack.
     - **Alias merges proposed (Bucket B)** — one line per proposal, awaiting confirmation.
     - **Candidates staged (Bucket C)** — paths to new/updated stubs in `+ Inbox/people-candidates/`.
     - **Below threshold (logged, not staged)** — one-line tally with count only.

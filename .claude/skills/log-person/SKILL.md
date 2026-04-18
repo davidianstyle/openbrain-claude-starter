@@ -14,7 +14,7 @@ description: Create a new person atomic note at + Atlas/People/<Full Name>.md fr
 
 1. **Check for existing note.** If `+ Atlas/People/<name>.md` already exists, stop and tell the user — offer to open it instead.
 2. **Scaffold from template.** Copy `+ Extras/Templates/Person.md` to `+ Atlas/People/<name>.md`. Set `title: <name>` and `created:` to today.
-3. **Context seed (unless `quick`).**
+3. **Context seed (unless `quick`).** Fan out across every `gmail_*` and every `slack_*` in a single tool-use block — all calls are independent and must never be serialized.
    - For each `gmail_*` MCP, `gmail_search_messages` for the person's name (as both sender and recipient). Collect top 5 hits per account. Extract email addresses and populate frontmatter `emails:`.
    - For each `slack_*` MCP, `slack_search_users` for the name. Populate `slack:` with `workspace-slug:user_id` entries.
    - Cross-reference across accounts — if the same email address appears in multiple `gmail_*` account sweeps, that's fine (common for cc'd threads).
