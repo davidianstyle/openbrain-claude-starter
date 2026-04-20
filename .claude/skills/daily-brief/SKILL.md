@@ -50,20 +50,20 @@ Assemble the user's daily briefing for today (or a date passed as `$1`). Creates
    - **New faces** — unknown humans seen in today's activity, one line each with source context. Omit the section if empty.
    - A single-line **Focus suggestion** based on the above
 8. Never touch any other section of the daily note. Only the `## Morning brief` section is managed by this skill.
-9. **Refresh `Dashboard.md` at the vault root (optional).** If a `Dashboard.md` file exists at the vault root, this skill is the primary owner of its forward-looking sections and rebuilds them on every run. **Skip this step entirely if `Dashboard.md` does not exist** — log a one-line warning and move on. Only run when the target date is **today**; historical reruns must not retroactively rewrite the dashboard. Procedure:
-   - For each H2 section listed below, **replace the body in place** (find the heading and overwrite everything up to the next H2 or EOF). Never touch `## Quick links` (static) or sections owned by `/daily-review` and `/weekly-review`.
+9. **Refresh `Dashboard.md` at the vault root.** This skill is the primary owner of the dashboard and rebuilds it on every run, since it already has all the data in hand. Only run this step when the target date is **today** — historical reruns must not retroactively rewrite the dashboard. Procedure:
+   - For each H2 section in `Dashboard.md` listed below, **replace the body in place** (find the heading and overwrite everything up to the next H2 or EOF). Do not create the file from scratch — if `Dashboard.md` is missing, log a warning and skip step 9. Never touch `## Quick links` (static) or sections owned by `/daily-review` and `/weekly-review` (see below).
    - **Owned by `/daily-brief`** (rebuild every run):
      - `## Today — <Day YYYY-MM-DD>` — pivot meeting + 5–8 line condensed timeline of today's anchors. Update the heading date too.
      - `## Needs a reply / open loops` — same data as the brief's "Needs a reply" section, but formatted as one bullet per item with `[[wikilinks]]`. Filter out delegated/FYI noise.
      - `## People past cadence` — same content as the brief's section.
      - `## Delegated / FYI` — auto-alerts and FYI items surfaced today that the user does not need to action.
-   - **Owned by `/weekly-review`** (only refresh if the section is missing or older than 7 days — otherwise leave alone): `## This week (...)`, `## Top priorities`. Compare the dashboard's frontmatter `updated:` field against today; if `updated >= start-of-week`, leave these sections alone. If they need refreshing and `/weekly-review` hasn't run yet, generate a "stub" version from current Asana + calendar data so the dashboard isn't stale.
+   - **Owned by `/weekly-review`** (only refresh if the section is missing or older than 7 days — otherwise leave alone): `## This week (...)`, `## Top priorities`. To detect age, compare the dashboard's frontmatter `updated:` field against today; if `updated >= start-of-week`, leave these sections alone. If they need refreshing and `/weekly-review` hasn't run yet, generate a "stub" version from current Asana + calendar data so the dashboard isn't stale.
    - **Frontmatter.** Update the `updated:` field to `<today>` after writing.
    - **Idempotence.** Re-running `/daily-brief` on the same day must produce the same dashboard (modulo any new mail/slack/calendar deltas). Never append; always replace section bodies in place.
 
 ## Output shape
 
-Create or refresh the `## Morning brief` section in `+ Atlas/Daily/<date>.md`, plus the dashboard sections owned by this skill in `Dashboard.md` if it exists (see step 9). Report a short summary of what was (re)generated to the user in chat — including the dashboard refresh status.
+Create or refresh the `## Morning brief` section in `+ Atlas/Daily/<date>.md`, plus the dashboard sections owned by this skill in `Dashboard.md` (see step 9). Report a short summary of what was (re)generated to the user in chat — including the dashboard refresh status.
 
 ## Asana scope note
 

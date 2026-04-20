@@ -20,7 +20,7 @@ description: Create a new person atomic note at + Atlas/People/<Full Name>.md fr
    - Cross-reference across accounts — if the same email address appears in multiple `google_*` account sweeps, that's fine (common for cc'd threads).
 4. **Relationship inference.** Based on which accounts surfaced the person, suggest a default `relationship:` value:
    - Appears only in the user's work Google/Slack sources → `work`
-   - Appears in one of the user's other accounts mapped to a specific community (see CLAUDE.md §12 account table) → use that community's label
+   - Appears in one of the user's other accounts mapped to a specific community (see CLAUDE.md §11 account table) → use that community's label
    - Otherwise → `network` (user can correct)
 5. **Add to MOC.** Append `- [[<name>]]` under the correct section of `+ Spaces/People.md` (based on relationship).
 6. **Report.** Show the populated frontmatter and the inferred context; ask the user to confirm or correct before saving.
