@@ -14,15 +14,15 @@ description: Draft a follow-up email or Slack message for a given person or thre
 
 1. **Resolve subject + channel.**
    - Person name → look up `+ Atlas/People/<name>.md`. Default channel = email if `emails` is populated, else Slack.
-   - Thread id → fetch via matching `gmail_*` MCP; channel = email.
+   - Thread id → fetch via matching `google_*` MCP; channel = email.
    - Slack permalink → extract workspace slug and thread; channel = Slack.
 2. **Pick the right account.**
-   - **Email:** match the person's primary email domain to the best `gmail_*` account slug. If the person is in `relationship: [work]`, default to the work `gmail_*` MCP (see CLAUDE.md §11 for the configured work Google slug).
+   - **Email:** match the person's primary email domain to the best `google_*` account slug. If the person is in `relationship: [work]`, default to the work `google_*` MCP (see CLAUDE.md §12 for the configured work Google slug).
    - **Slack:** use the workspace from the permalink, or from the person's `slack:` frontmatter.
 3. **Gather context.** Pull the last 1–2 interactions from `+ Atlas/Interactions/`, the open commitments section from the person note, and the last email/Slack thread excerpt.
 4. **Draft the message.** Match the user's voice — direct, terse, no filler. Lead with the ask. For email, include subject line. For Slack, no subject.
 5. **Save as draft.**
-   - **Email:** call `gmail_create_draft` on the matching `gmail_*` MCP. Report the draft id.
+   - **Email:** call `gmail_draft_email` on the matching `google_*` MCP. Report the draft id.
    - **Slack:** call `slack_send_message_draft` (or equivalent) on the matching `slack_*` MCP. Report the draft/scheduled id.
 6. **Log vault-side trail.** If `$1` resolved to a person note, append a bullet under its `## Threads` section so `/what-am-i-missing` and future lookups can see the pending draft:
    `- <YYYY-MM-DD> · drafted follow-up (<channel>:<draft-id>) — <intent or one-line gist>`

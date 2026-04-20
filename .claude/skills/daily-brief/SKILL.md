@@ -15,11 +15,11 @@ Assemble the user's daily briefing for today (or a date passed as `$1`). Creates
 
 > **Date check first.** Before any other work, if `$1` is not supplied, resolve "today" by running `Bash: date "+%Y-%m-%d %A %H:%M %Z"`. Do **not** trust the session-injected `currentDate` field — it can lag the real clock by a day. Use the shell result as the target date for everything below.
 
-> **Parallelization:** steps 1–6 are all independent read-only gathers. Fan out **every** MCP call — all `gcal_*` accounts, all `gmail_*` accounts, all `slack_*` workspaces, all configured Asana workspaces, and Fathom — in a single tool-use block. Do not serialize across accounts or across steps.
+> **Parallelization:** steps 1–6 are all independent read-only gathers. Fan out **every** MCP call — all `google_*` accounts, all `slack_*` workspaces, all configured Asana workspaces, and Fathom — in a single tool-use block. Do not serialize across accounts or across steps.
 
-1. **Calendar sweep.** For each `gcal_*` MCP, call `gcal_list_events` for the target date (00:00 → 23:59 local). Merge into a single timeline; tag each event with the owning account slug. Collapse duplicate events that appear on multiple calendars (same title + time).
+1. **Calendar sweep.** For each `google_*` MCP, call `calendar_list_events` for the target date (00:00 → 23:59 local). Merge into a single timeline; tag each event with the owning account slug. Collapse duplicate events that appear on multiple calendars (same title + time).
 1b. **Fathom recordings.** Call `mcp__fathom__list_meetings` for meetings in the last 24h. For each, note title, participants, and whether a summary is available. Surface under a **Recent recordings** section in the brief — title, attendees, and a `fathom:<meeting-id>` reference the user can pass to `/capture-meeting` if they haven't already processed it.
-2. **Priority mail.** For each `gmail_*` MCP, `gmail_search_messages` with `is:unread newer_than:2d (is:important OR is:starred OR label:^iim)`. Cap at 5 per account. Capture subject, sender, account slug.
+2. **Priority mail.** For each `google_*` MCP, `gmail_search_emails` with `is:unread newer_than:2d (is:important OR is:starred OR label:^iim)`. Cap at 5 per account. Capture subject, sender, account slug.
 3. **Slack attention.** For each `slack_*` MCP, search for mentions of the user in the last 24h and list unread DMs. Cap at 5 per workspace.
 4. **Overdue tasks.** For each configured Asana workspace (`asana_personal`, `asana_work`), `asana_get_my_tasks` with `completed_since=now`, `opt_fields=name,due_on,due_at,completed,assignee_section.name,projects.name,permalink_url,recurrence`, and post-filter to due date < today. The `recurrence` field is mandatory — see "Asana display ordering" below for why.
 5. **Stale relationships.** Grep `+ Atlas/People/*.md` for notes whose `last_contact` is older than their `cadence` allows (weekly: > 7d, monthly: > 30d, quarterly: > 90d, asneeded: never stale). Cap at 5.
@@ -30,15 +30,15 @@ Assemble the user's daily briefing for today (or a date passed as `$1`). Creates
    - Automated notifications (Asana digests, Dependabot, commercial mailing lists)
 
    For each actionable item:
-   1. **Resolve account + thread.** Use the `gmail_*` MCP that surfaced the message (from step 2), or the `slack_*` workspace (from step 3).
-   2. **Gather context.** Read the full thread via `gmail_<slug>_read_email` (using the message ID from step 2). Check `+ Atlas/People/` for the sender's person note — pull open commitments, recent interactions, and relationship context. For Slack, read the thread via `slack_<slug>_conversations_replies`.
+   1. **Resolve account + thread.** Use the `google_*` MCP that surfaced the message (from step 2), or the `slack_*` workspace (from step 3).
+   2. **Gather context.** Read the full thread via `gmail_read_email` on the matching `google_*` MCP (using the message ID from step 2). Check `+ Atlas/People/` for the sender's person note — pull open commitments, recent interactions, and relationship context. For Slack, read the thread via `slack_<slug>_conversations_replies`.
    3. **Compose draft.** Match the user's voice (see CLAUDE.md §6). Lead with the ask or the answer. For email: use `Re: <original subject>`. For Slack: no subject.
    4. **Save draft.**
-      - **Email:** `gmail_<slug>_draft_email` with `threadId` + `inReplyTo` set so it appears as an in-thread reply.
+      - **Email:** `gmail_draft_email` on the matching `google_*` MCP with `threadId` + `inReplyTo` set so it appears as an in-thread reply.
       - **Slack:** `mcp__claude_ai_Slack__slack_send_message_draft` with `channel_id` + `thread_ts` if replying in-thread. (This is the one approved use of the deprecated connector — see CLAUDE.md §9.)
    5. **Log vault trail.** If the sender resolved to a person note, append a bullet under its `## Threads` section: `- <date> · drafted follow-up (<channel>:<draft-id>) — <one-line gist>`. Do NOT update `last_contact` — a draft is not a touchpoint.
 
-   **Parallelization:** fan out all `read_email` / thread-read calls in one tool-use block, then fan out all `draft_email` / `slack_send_message_draft` calls in the next block.
+   **Parallelization:** fan out all `gmail_read_email` / thread-read calls in one tool-use block, then fan out all `gmail_draft_email` / `slack_send_message_draft` calls in the next block.
 
 7. **Compose the daily note.** If `+ Atlas/Daily/<date>.md` does not exist, scaffold from `+ Extras/Templates/Daily.md`. If a `## Morning brief` section already exists in the note, **replace its body in place** (find the `## Morning brief` heading and overwrite everything up to the next H2 or EOF). Otherwise insert a new `## Morning brief` section near the top. Contents:
    - **Today's calendar** (merged timeline, grouped bullet list, `[HH:MM–HH:MM] Title · account-slug · other attendees if any`)
@@ -95,5 +95,5 @@ Within each group, secondary sort by `due_on` ascending. Omit empty groups. Rend
 
 - **Idempotent by design.** Running `/daily-brief` twice on the same date replaces the section rather than duplicating it. The section header stays `## Morning brief` (the name reflects content intent, not the time of day the skill was invoked).
 - Never **send** any email or Slack message — this skill creates drafts only (step 6b). Drafts are not sent; the user reviews and sends from the native client.
-- If a given MCP server fails, note it in the brief (`_(gmail_<slug> or gcal_<slug>: unavailable)_`) and continue.
+- If a given MCP server fails, note it in the brief (`_(google_<slug>: unavailable)_`) and continue.
 - Respect the `#workspace/personal` vs `#workspace/work` split only if the user asks for a single-workspace brief (e.g. `/daily-brief work` → skip all `workspace=personal` sources). Without a flag, include everything.

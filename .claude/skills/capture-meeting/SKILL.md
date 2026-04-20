@@ -11,13 +11,13 @@ description: Turn rough meeting notes or a transcript into an atomic interaction
 
 ## Procedure
 
-1. **Ingest source.** If a file path, read it. If inline text, use it. If an event id, fetch the event + notes via the matching `gcal_*` MCP. If a Fathom meeting ID/URL or Google Meet conference record ID/URL is given directly, fetch that specific source first — then still attempt the other sources in parallel for completeness.
+1. **Ingest source.** If a file path, read it. If inline text, use it. If an event id, fetch the event + notes via the matching `google_*` MCP's `calendar_list_events` / `calendar_get_event`. If a Fathom meeting ID/URL or Google Meet conference record ID/URL is given directly, fetch that specific source first — then still attempt the other sources in parallel for completeness.
 
-   **For calendar events and meeting titles**, resolve the calendar event first (via `gcal_*` search), then fetch all three transcript sources **in parallel**:
+   **For calendar events and meeting titles**, resolve the calendar event first (via `google_*` calendar search), then fetch all three transcript sources **in parallel**:
 
-   - **Google Meet transcript** — use `mcp__gmeet_<slug>__list-meetings` scoped to the meeting date (±1 day window), then `mcp__gmeet_<slug>__get-meet-transcript` for the matching conference. To pick the right `gmeet_*` server, infer from the organizer's email (match to a known slug), or use a slug hint if provided. Default to the user's work `gmeet_*` MCP (see CLAUDE.md §11) if ambiguous. If `list-meetings` doesn't return the expected meeting, also try matching by the Meet link from the calendar event's `conferenceData` — the conference ID (e.g. `jjj-pswx-emx`) should appear in the results.
+   - **Google Meet transcript** — use `meet_list_meetings` on the matching `google_*` MCP scoped to the meeting date (±1 day window), then `meet_get_transcript` for the matching conference. To pick the right `google_*` server, infer from the organizer's email (match to a known slug), or use a slug hint if provided. Default to the user's work `google_*` MCP (see CLAUDE.md §12) if ambiguous. If `meet_list_meetings` doesn't return the expected meeting, also try matching by the Meet link from the calendar event's `conferenceData` — the conference ID (e.g. `jjj-pswx-emx`) should appear in the results.
    - **Fathom** — call `mcp__fathom__fathom_search_meetings` with the meeting title and date range, then `mcp__fathom__fathom_get_summary` and `mcp__fathom__fathom_get_transcript` for the matched recording.
-   - **Gemini notes** — search the organizer's `gmail_*` MCP (or the user's work `gmail_*` MCP for work meetings) with query `from:gemini-notes@google.com subject:"<meeting title>" newer_than:2d`. If found, read the email. Gemini notes contain a summary, topic sections, and suggested next steps with owner attribution.
+   - **Gemini notes** — search the organizer's `google_*` MCP (or the user's work `google_*` MCP for work meetings) with `gmail_search_emails` query `from:gemini-notes@google.com subject:"<meeting title>" newer_than:2d`. If found, read the email via `gmail_read_email`. Gemini notes contain a summary, topic sections, and suggested next steps with owner attribution.
 
    **Merging sources:** Use all available sources together — they are complementary, not competing. General guidance:
    - **Fathom summary** is best for structured extraction (action items, topic labels, decisions) — use it as the primary scaffold when available.

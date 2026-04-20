@@ -97,15 +97,13 @@ Apply these substitutions to any text you port. They are deliberate — do them 
 
 #### MCP-name substitutions
 
-The vault uses concrete slugs like `gmail_jane_acme_com`, `gcal_jane_acme_com`, `slack_acme_slack_com`. The template uses pattern references and the placeholder tables in CLAUDE.md.
+The vault uses concrete slugs like `google_jane_acme_com`, `slack_acme_slack_com`. The template uses pattern references and the placeholder tables in CLAUDE.md.
 
 | Vault literal | Template form |
 |---|---|
-| `mcp__gmail_<specific>__*` | `mcp__gmail_<slug>__*` |
-| `mcp__gcal_<specific>__*` | `mcp__gcal_<slug>__*` |
-| `mcp__gmeet_<specific>__*` | `mcp__gmeet_<slug>__*` |
+| `mcp__google_<specific>__*` | `mcp__google_<slug>__*` |
 | `mcp__slack_<specific>__*` | `mcp__slack_<workspace_slug>__*` |
-| Specific `gmail_*` default (e.g. for work) | "the user's work `gmail_*` MCP (see CLAUDE.md §11)" |
+| Specific `google_*` default (e.g. for work) | "the user's work `google_*` MCP (see CLAUDE.md §12)" |
 | Hardcoded Asana workspace gid | `<asana_work_workspace_gid>` placeholder, or strip |
 | References to `asana_work` and `asana_personal` MCPs | Keep — these names are already generic and used in the template |
 
@@ -135,7 +133,7 @@ When in doubt, leave a CLAUDE.md hunk un-ported and surface it in the report for
 Skills are the bread and butter of this skill. Most diffs in `.claude/skills/*/SKILL.md` are tractable:
 
 - "After displaying the numbered list, ask [Name] to..." → "After displaying the numbered list, ask the user to..."
-- Default MCP slugs in fall-back instructions → generic `<slug>` pattern + a CLAUDE.md §11 reference
+- Default MCP slugs in fall-back instructions → generic `<slug>` pattern + a CLAUDE.md §12 reference
 - Example timestamps and example interaction note slugs → keep as examples but ensure they don't reference real people
 
 If the vault has a skill the template doesn't, port it as a new file. Strip any vault-specific paths. Make sure the frontmatter `name:` and `description:` are clean.

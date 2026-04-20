@@ -118,7 +118,7 @@ When a template in `+ Extras/Templates/` gains or removes a required frontmatter
 - **Never push to Asana without a `#asana/*` tag.**
 - **Never `git commit` or `git push` manually** — the Stop hook handles commits automatically. If you must intervene, ask first.
 - **Never modify `~/.config/openbrain/.env`** or echo its contents.
-- **Never use deprecated remote connectors** — `mcp__claude_ai_Asana__*`, `mcp__claude_ai_Google_Calendar__*`, `mcp__gmail__*`, `mcp__claude_ai_Slack__*` are single-account and bypass the multi-account routing defined in §11. Use the local `asana_*` / `gmail_*` / `gcal_*` / `gmeet_*` / `gdrive_*` / `gslides_*` / `slack_*` MCPs instead.
+- **Never use deprecated remote connectors** — `mcp__claude_ai_Asana__*`, `mcp__claude_ai_Google_Calendar__*`, `mcp__gmail__*`, `mcp__claude_ai_Slack__*` are single-account and bypass the multi-account routing defined in §11. Use the local `asana_*` / `google_*` / `slack_*` MCPs instead.
   - **Exception:** `mcp__claude_ai_Slack__slack_send_message_draft` may be used for saving Slack drafts, since the local `slack_*` MCPs do not support draft creation. This is the only approved use of the deprecated connector. Never use it for sending messages or any other operation.
 - **Never commit real secrets** to `.openbrain/env.example`. It is the tracked template; the real `.env` lives at `~/.config/openbrain/.env` (mode 600) and is out of repo.
 
@@ -144,7 +144,7 @@ Daily notes, interactions, and people candidates grow linearly. To keep the vaul
 
 Local stdio MCP servers, each scoped to a single account + service, launched via wrapper scripts in `~/.config/openbrain/` that source `.env`. All secrets live in `~/.config/openbrain/.env`; the tracked template is `.openbrain/env.example`.
 
-Gmail, Calendar, Meet, Drive/Docs/Sheets, and Slides are separate MCP packages (`@gongrzhe/server-gmail-autoauth-mcp`, `@cocal/google-calendar-mcp`, `@dtannen/google-meet-mcp`, `@a-bonus/google-docs-mcp`, and `google-slides-mcp`), each launched per Google account — so each Google identity gets a `gmail_*`, `gcal_*`, `gmeet_*`, `gdrive_*`, and `gslides_*` server.
+Google services (Gmail, Calendar, Meet, Drive/Docs/Sheets, and Slides) are served by a single consolidated MCP server per account (`google-mcp`), launched via `google-mcp.sh <slug>`. Each server exposes tools prefixed by service: `gmail_*`, `calendar_*`, `meet_*`, `drive_*`, `docs_*`, `sheets_*`, `slides_*`.
 
 ### Configured accounts
 
@@ -162,7 +162,7 @@ Gmail, Calendar, Meet, Drive/Docs/Sheets, and Slides are separate MCP packages (
 
 ### Routing tags
 
-- `#gmail/<slug>`, `#gcal/<slug>`, `#gmeet/<slug>`, `#gdrive/<slug>`, `#gslides/<slug>` — one per Google account
+- `#google/<slug>` — one per Google account (covers Gmail, Calendar, Meet, Drive, Docs, Sheets, Slides)
 - `#slack/<slug>` — one per Slack workspace
 - `#asana/personal`, `#asana/work` — Asana workspace routing
 - `#workspace/personal` vs `#workspace/work` — umbrella grouping for cross-service filtering
@@ -172,7 +172,7 @@ Gmail, Calendar, Meet, Drive/Docs/Sheets, and Slides are separate MCP packages (
 Re-run the incremental add script from the vault root:
 
 ```bash
-./bootstrap/lib/add-google-account.sh <email>      # adds one Google account (Gmail+Cal+Meet+Drive+Slides)
+./bootstrap/lib/add-google-account.sh <email>      # adds one Google account (Gmail+Cal+Meet+Drive)
 ./bootstrap/lib/add-slack-workspace.sh <subdomain> # adds one Slack workspace
 ./bootstrap/lib/add-asana.sh personal|work         # adds Asana PAT + registers MCP
 ./bootstrap/lib/add-fathom.sh                      # adds Fathom API key + registers MCP

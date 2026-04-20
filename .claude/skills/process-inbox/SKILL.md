@@ -9,10 +9,10 @@ Run the CLAUDE.md §4 inbox triage workflow across all sources.
 
 ## Procedure
 
-> **Parallelization:** steps 1, 2, and 3 are independent (vault read + all `gmail_*` + all `slack_*`). Issue them all in a single tool-use block — do not loop serially through accounts.
+> **Parallelization:** steps 1, 2, and 3 are independent (vault read + all `google_*` + all `slack_*`). Issue them all in a single tool-use block — do not loop serially through accounts.
 
 1. **Vault inbox.** Read every `.md` file in `+ Inbox/`. For each, propose classification (atomic / literature / task / project kickoff / ephemeral) and destination, per CLAUDE.md §4.
-2. **Gmail sweep.** For each `gmail_*` MCP, `gmail_search_messages` with `is:unread newer_than:1d` (+ `-category:promotions -category:social -label:notifications` to filter noise). Cap 10 per account. Group by account slug.
+2. **Gmail sweep.** For each `google_*` MCP, `gmail_search_emails` with `is:unread newer_than:1d` (+ `-category:promotions -category:social -label:notifications` to filter noise). Cap 10 per account. Group by account slug.
 3. **Slack sweep.** For each `slack_*` MCP, list unread DMs and `@mentions` in the last 24h. Cap 10 per workspace.
 4. **Flag items needing a reply.** For each Gmail/Slack item, infer whether the user is the next actor (question addressed to them, explicit request, etc.). Surface those in a "Needs reply" section.
 4b. **Draft replies for actionable threads.** For each item flagged in step 4 where the user is the next actor, draft a response and save it to the native client. Skip:
@@ -21,11 +21,11 @@ Run the CLAUDE.md §4 inbox triage workflow across all sources.
    - Automated notifications (Asana digests, Dependabot, commercial mailing lists)
 
    For each actionable item:
-   1. **Resolve account + thread.** Use the `gmail_*` MCP that surfaced the message, or the `slack_*` workspace.
-   2. **Gather context.** Read the full thread via `gmail_<slug>_read_email` (using the message ID from step 2). Check `+ Atlas/People/` for the sender's person note — pull open commitments, recent interactions, and relationship context. For Slack, read the thread via `slack_<slug>_conversations_replies`.
+   1. **Resolve account + thread.** Use the `google_*` MCP that surfaced the message, or the `slack_*` workspace.
+   2. **Gather context.** Read the full thread via `gmail_read_email` on the matching `google_*` MCP (using the message ID from step 2). Check `+ Atlas/People/` for the sender's person note — pull open commitments, recent interactions, and relationship context. For Slack, read the thread via `slack_<slug>_conversations_replies`.
    3. **Compose draft.** Match the user's voice (see CLAUDE.md §6). Lead with the ask or the answer. For email: use `Re: <original subject>`. For Slack: no subject.
    4. **Save draft.**
-      - **Email:** `gmail_<slug>_draft_email` with `threadId` + `inReplyTo` set so it appears as an in-thread reply.
+      - **Email:** `gmail_draft_email` on the matching `google_*` MCP with `threadId` + `inReplyTo` set so it appears as an in-thread reply.
       - **Slack:** `mcp__claude_ai_Slack__slack_send_message_draft` with `channel_id` + `thread_ts` if replying in-thread. (This is the one approved use of the deprecated connector — see CLAUDE.md §9.)
    5. **Log vault trail.** If the sender resolved to a person note, append a bullet under its `## Threads` section: `- <date> · drafted follow-up (<channel>:<draft-id>) — <one-line gist>`. Do NOT update `last_contact`.
 
@@ -33,7 +33,7 @@ Run the CLAUDE.md §4 inbox triage workflow across all sources.
    - **Interactive (default):** show each proposed draft and ask for approval before saving. Shape: "Draft this reply to [sender] re: [subject]? [Yes / Skip / Edit intent]"
    - **Scheduled:** auto-draft without confirmation (drafts are not sent, so this is safe — the user reviews and sends from Gmail/Slack).
 
-   **Parallelization:** fan out all `read_email` / thread-read calls in one block, then fan out all `draft_email` / `slack_send_message_draft` calls in the next block.
+   **Parallelization:** fan out all `gmail_read_email` / thread-read calls in one block, then fan out all `gmail_draft_email` / `slack_send_message_draft` calls in the next block.
 
 5. **People detection pass.** From senders/recipients of the Gmail sweep and counterparties of the Slack sweep, match identifiers against `+ Atlas/People/*.md` (`emails`, `slack`, `title`, `aliases`). Apply `/people-sync`'s noise filters (step 4) and its Bucket C staging threshold (step 7) verbatim — `/people-sync` is the single source of truth for these rules. Note that `/process-inbox` does not read calendar, so the "calendar event where the user is also an attendee" branch of the threshold is simply unavailable here; a Gmail thread where the unknown human directly replied to the user (or vice versa) counts as the Gmail equivalent of a direct meeting for threshold purposes.
    - In **interactive mode**: surface qualifying unknowns in a "People candidates" section — do not auto-stage.

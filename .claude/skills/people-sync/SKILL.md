@@ -15,9 +15,9 @@ Scan recent activity across all multi-account MCPs and Fathom, propose new perso
 ## Procedure
 
 1. **Resolve window.** Compute `since = today - lookback`.
-2. **Collect touchpoints across all accounts.** Fan out all four sources in a single tool-use block — every `gmail_*`, every `gcal_*`, every `slack_*`, and Fathom. All calls are independent and must run concurrently; never loop through accounts serially.
-   - **Gmail** — for each `gmail_*` MCP, `gmail_search_messages` with `newer_than:<window>` scoped to inbox + sent. Extract `From`, `To`, `Cc` addresses and display names from each thread. Tag each touchpoint with account slug and date.
-   - **Google Calendar** — for each `gcal_*` MCP, `gcal_list_events` over the window. Extract attendees (name + email, skip resource rooms and the account owner).
+2. **Collect touchpoints across all accounts.** Fan out all four sources in a single tool-use block — every `google_*`, every `slack_*`, and Fathom. All calls are independent and must run concurrently; never loop through accounts serially.
+   - **Gmail** — for each `google_*` MCP, `gmail_search_emails` with `newer_than:<window>` scoped to inbox + sent. Extract `From`, `To`, `Cc` addresses and display names from each thread. Tag each touchpoint with account slug and date.
+   - **Google Calendar** — for each `google_*` MCP, `calendar_list_events` over the window. Extract attendees (name + email, skip resource rooms and the account owner).
    - **Slack** — for each `slack_*` MCP, pull recent DMs and mentions via `conversations_history` / `conversations_search_messages`. Extract user ids; resolve to display names via `users_search` or profile lookups. Tag with workspace slug.
    - **Fathom** — call `mcp__fathom__list_meetings` for the lookback window. Extract invitees (name + email) from each meeting. Tag touchpoints with source `fathom` and the meeting date. Each Fathom meeting where the user is a participant counts as a calendar-grade signal (direct meeting = high signal for Bucket C threshold).
 3. **Normalize into a touchpoint table.** One row per (person identifier, source, date). Identifier = email address (Gmail/Cal) or `workspace-slug:user_id` (Slack).
@@ -25,7 +25,7 @@ Scan recent activity across all multi-account MCPs and Fathom, propose new perso
    - No-reply / bot addresses (`noreply@`, `no-reply@`, `notifications@`, `mailer-daemon@`, etc.).
    - Mailing list addresses and Google Group aliases.
    - Calendar resources (rooms, equipment).
-   - The account owner themselves (all of the user's own addresses — see CLAUDE.md §11 for the configured Google slugs).
+   - The account owner themselves (all of the user's own addresses — see CLAUDE.md §12 for the configured Google slugs).
    - Any addresses the user has explicitly flagged as delegations / FYI-only in an auto-memory or CLAUDE.md note.
 5. **Match against existing people.** Apply the alias resolution rules from CLAUDE.md §13:
    - Exact email → `emails:` array = definite match.
