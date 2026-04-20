@@ -4,18 +4,10 @@ set -euo pipefail
 # shellcheck source=_common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
-case "${1:?usage: asana-mcp.sh personal|work}" in
-  personal)
-    require_env ASANA_PAT_PERSONAL
-    export ASANA_ACCESS_TOKEN="$ASANA_PAT_PERSONAL"
-    ;;
-  work)
-    require_env ASANA_PAT_WORK
-    export ASANA_ACCESS_TOKEN="$ASANA_PAT_WORK"
-    ;;
-  *)
-    die "unknown account '$1' (expected personal|work)"
-    ;;
-esac
+SLUG="${1:?usage: asana-mcp.sh personal|work}"
+SERVER="$HOME/Code/asana-mcp/dist/index.js"
 
-exec npx -y @roychri/mcp-server-asana
+require_env "ASANA_PAT_$(echo "$SLUG" | tr '[:lower:]' '[:upper:]')"
+[[ -f "$SERVER" ]] || die "asana-mcp not built: $SERVER (run npm run build in ~/Code/asana-mcp)"
+
+exec node "$SERVER" --slug "$SLUG"
