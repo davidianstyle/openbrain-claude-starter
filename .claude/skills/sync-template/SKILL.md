@@ -49,14 +49,14 @@ VAULT="$(pwd)"
 TEMPLATE="${OPENBRAIN_TEMPLATE_DIR:-$HOME/Code/openbrain-template}"
 ```
 
-```bash
-cd "$TEMPLATE" && git pull --rebase --autostash
-```
-
-If the template repo doesn't exist locally, clone it:
+If the template directory exists, pull the latest changes; otherwise clone it:
 
 ```bash
-git clone git@github.com:davidianstyle/openbrain-template.git "$TEMPLATE"
+if [ -d "$TEMPLATE/.git" ]; then
+  cd "$TEMPLATE" && git pull --rebase --autostash
+else
+  git clone git@github.com:davidianstyle/openbrain-template.git "$TEMPLATE"
+fi
 ```
 
 ### 2. Inventory drift

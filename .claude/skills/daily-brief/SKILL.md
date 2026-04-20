@@ -38,7 +38,7 @@ Assemble the user's daily briefing for today (or a date passed as `$1`). Creates
       - **Slack:** `mcp__claude_ai_Slack__slack_send_message_draft` with `channel_id` + `thread_ts` if replying in-thread. (This is the one approved use of the deprecated connector — see CLAUDE.md §9.)
    5. **Log vault trail.** If the sender resolved to a person note, append a bullet under its `## Threads` section: `- <date> · drafted follow-up (<channel>:<draft-id>) — <one-line gist>`. Do NOT update `last_contact` — a draft is not a touchpoint.
 
-   **Parallelization:** fan out all `read_email` / thread-read calls in one tool-use block, then fan out all `draft_email` / `slack_send_message_draft` calls in the next block.
+   **Parallelization:** fan out all `gmail_read_email` / thread-read calls in one tool-use block, then fan out all `gmail_draft_email` / `slack_send_message_draft` calls in the next block.
 
 7. **Compose the daily note.** If `+ Atlas/Daily/<date>.md` does not exist, scaffold from `+ Extras/Templates/Daily.md`. If a `## Morning brief` section already exists in the note, **replace its body in place** (find the `## Morning brief` heading and overwrite everything up to the next H2 or EOF). Otherwise insert a new `## Morning brief` section near the top. Contents:
    - **Today's calendar** (merged timeline, grouped bullet list, `[HH:MM–HH:MM] Title · account-slug · other attendees if any`)
