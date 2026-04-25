@@ -110,6 +110,37 @@ require_env() {
   [[ -n "${!var:-}" ]] || die "$var not set in $ENV_FILE"
 }
 
+# Auto-clone and build an MCP server repo if the built artifact is missing.
+# Usage: ensure_mcp_server <repo-name>
+# E.g.:  ensure_mcp_server asana-mcp
+#   → clones github.com/davidianstyle/asana-mcp to ~/Code/asana-mcp
+#   → runs npm install && npm run build
+#   → expects dist/index.js to exist after build
+ensure_mcp_server() {
+  local name="$1"
+  local repo_dir="$HOME/Code/$name"
+  local server="$repo_dir/dist/index.js"
+
+  if [[ -f "$server" ]]; then
+    return 0
+  fi
+
+  echo "openbrain mcp: $name not found — auto-installing..." >&2
+
+  if [[ ! -d "$repo_dir" ]]; then
+    echo "openbrain mcp: cloning github.com/davidianstyle/$name..." >&2
+    git clone "https://github.com/davidianstyle/$name.git" "$repo_dir" >&2 \
+      || die "failed to clone $name"
+  fi
+
+  echo "openbrain mcp: building $name..." >&2
+  (cd "$repo_dir" && npm install --ignore-scripts 2>&1 && npm run build 2>&1) >&2 \
+    || die "failed to build $name — run 'cd $repo_dir && npm install && npm run build' manually"
+
+  [[ -f "$server" ]] || die "$name built but dist/index.js not found"
+  echo "openbrain mcp: $name installed at $server" >&2
+}
+
 ensure_node_on_path
 install_browser_suppressor
 load_env

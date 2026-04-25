@@ -13,6 +13,6 @@ SERVER="$HOME/Code/google-mcp/dist/index.js"
 
 [[ -f "$OAUTH_CLIENT" ]] || die "shared OAuth client missing: $OAUTH_CLIENT (run bootstrap/lib/add-google-account.sh $SLUG)"
 [[ -f "$CREDS_FILE" ]] || die "per-account credentials missing: $CREDS_FILE (run add-google-account.sh)"
-[[ -f "$SERVER" ]] || die "google-mcp not built: $SERVER (run npm run build in ~/Code/google-mcp)"
+ensure_mcp_server "google-mcp"
 
 exec node "$SERVER" --slug "$SLUG"

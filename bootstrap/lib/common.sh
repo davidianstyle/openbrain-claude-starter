@@ -71,9 +71,55 @@ yes_no() {
 }
 
 # ---------- prereqs ----------
+ensure_homebrew() {
+  if command -v brew >/dev/null 2>&1; then
+    return 0
+  fi
+  info "Homebrew not found — installing (this is the macOS package manager)..."
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  # Add Homebrew to PATH for this session
+  if [[ -x /opt/homebrew/bin/brew ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [[ -x /usr/local/bin/brew ]]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+  command -v brew >/dev/null 2>&1 || die "Homebrew installation failed"
+  ok "Homebrew installed"
+}
+
+ensure_git() {
+  if command -v git >/dev/null 2>&1; then
+    return 0
+  fi
+  info "git not found — installing via Xcode command-line tools..."
+  xcode-select --install 2>/dev/null || true
+  # Wait for installation to complete
+  until command -v git >/dev/null 2>&1; do
+    sleep 5
+  done
+  ok "git installed"
+}
+
 ensure_python3() {
-  # Prefer Homebrew, then system, then asdf as last resort
+  # Prefer Homebrew, then system. Every candidate must pass --version to
+  # catch asdf/nvm shims that exist as executables but error at runtime.
   for candidate in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+    if [[ -x "$candidate" ]] && "$candidate" --version >/dev/null 2>&1; then
+      PYTHON_BIN="$candidate"
+      return 0
+    fi
+  done
+  # Try whatever is on PATH, but verify it actually runs
+  PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
+  if [[ -n "$PYTHON_BIN" && -x "$PYTHON_BIN" ]] && "$PYTHON_BIN" --version >/dev/null 2>&1; then
+    return 0
+  fi
+  # Auto-install via Homebrew
+  info "python3 not found (or asdf shim has no version set) — installing via Homebrew..."
+  ensure_homebrew
+  brew install python
+  # Use Homebrew's python directly to avoid asdf shim interference
+  for candidate in /opt/homebrew/bin/python3 /usr/local/bin/python3; do
     if [[ -x "$candidate" ]]; then
       PYTHON_BIN="$candidate"
       return 0
@@ -81,32 +127,62 @@ ensure_python3() {
   done
   PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
   [[ -n "$PYTHON_BIN" && -x "$PYTHON_BIN" ]] \
-    || die "python3 not found — install via Homebrew (brew install python) or Xcode command-line tools"
+    || die "python3 installation failed"
+  ok "python3 installed"
 }
 
 ensure_node() {
-  if command -v node >/dev/null 2>&1 && command -v npx >/dev/null 2>&1; then
+  # Check if node actually works (not just that a shim exists)
+  if command -v node >/dev/null 2>&1 && node --version >/dev/null 2>&1; then
     return 0
   fi
-  # Try common install locations
-  for dir in /opt/homebrew/bin /usr/local/bin "$HOME/.asdf/shims" "$HOME/.nvm/versions/node"/*/bin; do
-    if [[ -x "$dir/node" && -x "$dir/npx" ]]; then
+  # Try real binaries, skipping broken asdf/nvm shims
+  for dir in /opt/homebrew/bin /usr/local/bin; do
+    if [[ -x "$dir/node" ]] && "$dir/node" --version >/dev/null 2>&1; then
       export PATH="$dir:$PATH"
       return 0
     fi
   done
-  die "node / npx not found — install via Homebrew (brew install node), asdf, or nvm"
-}
-
-ensure_gh() {
-  command -v gh >/dev/null 2>&1 \
-    || warn "gh CLI not found — you'll need it if you want automated git remote setup (brew install gh)"
+  # Try nvm versions
+  for dir in "$HOME/.nvm/versions/node"/*/bin; do
+    if [[ -x "$dir/node" ]] && "$dir/node" --version >/dev/null 2>&1; then
+      export PATH="$dir:$PATH"
+      return 0
+    fi
+  done
+  # Auto-install via Homebrew (bypasses asdf/nvm entirely)
+  info "node not found (or version manager shim has no version set) — installing via Homebrew..."
+  ensure_homebrew
+  brew install node
+  # Use Homebrew's node directly
+  for dir in /opt/homebrew/bin /usr/local/bin; do
+    if [[ -x "$dir/node" ]] && "$dir/node" --version >/dev/null 2>&1; then
+      export PATH="$dir:$PATH"
+      return 0
+    fi
+  done
+  command -v node >/dev/null 2>&1 && node --version >/dev/null 2>&1 || die "node installation failed"
+  ok "node installed"
 }
 
 ensure_claude_cli() {
-  if ! command -v claude >/dev/null 2>&1; then
-    warn "'claude' CLI not found on PATH — MCP registration will write to ~/.claude.json directly"
+  if command -v claude >/dev/null 2>&1; then
+    return 0
   fi
+  info "Claude Code CLI not found — installing via npm..."
+  ensure_node
+  npm install -g @anthropic-ai/claude-code
+  command -v claude >/dev/null 2>&1 || die "Claude Code CLI installation failed"
+  ok "Claude Code CLI installed"
+}
+
+ensure_gh() {
+  if command -v gh >/dev/null 2>&1; then
+    return 0
+  fi
+  info "gh CLI not found — installing via Homebrew (optional, for git remote setup)..."
+  ensure_homebrew
+  brew install gh || warn "gh installation failed — you can still set up git remotes manually"
 }
 
 ensure_venv() {
@@ -152,6 +228,17 @@ ensure_env_file() {
     cp "$REPO_ROOT/.openbrain/env.example" "$ENV_FILE"
     chmod 600 "$ENV_FILE"
     ok "created $ENV_FILE from template"
+  else
+    # Backfill any missing marker blocks from env.example into the existing .env
+    local marker
+    for marker in "GOOGLE_SLUGS" "SLACK_TOKENS"; do
+      local start="# --- ${marker} (managed by bootstrap) ---"
+      local end="# --- END ${marker} ---"
+      if ! grep -qF "$start" "$ENV_FILE"; then
+        printf '\n%s\n%s\n' "$start" "$end" >> "$ENV_FILE"
+        info "backfilled missing $marker markers into $ENV_FILE"
+      fi
+    done
   fi
 }
 
@@ -172,6 +259,7 @@ env_append_between_markers() {
   # Inserts LINE just before END_MARKER, if not already present between markers.
   local start="$1" end="$2" line="$3"
   ensure_env_file
+  [[ -n "${PYTHON_BIN:-}" ]] || ensure_python3
   if awk -v s="$start" -v e="$end" -v l="$line" '
     $0==s {in_block=1; next}
     $0==e {in_block=0; next}
@@ -181,7 +269,7 @@ env_append_between_markers() {
     return 0  # already present
   fi
   # Insert before end marker
-  python3 - "$ENV_FILE" "$start" "$end" "$line" <<'PY'
+  "$PYTHON_BIN" - "$ENV_FILE" "$start" "$end" "$line" <<'PY'
 import sys
 path, start, end, line = sys.argv[1:]
 with open(path) as f:

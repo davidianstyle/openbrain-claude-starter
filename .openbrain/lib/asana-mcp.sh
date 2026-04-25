@@ -8,6 +8,6 @@ SLUG="${1:?usage: asana-mcp.sh personal|work}"
 SERVER="$HOME/Code/asana-mcp/dist/index.js"
 
 require_env "ASANA_PAT_$(echo "$SLUG" | tr '[:lower:]' '[:upper:]')"
-[[ -f "$SERVER" ]] || die "asana-mcp not built: $SERVER (run npm run build in ~/Code/asana-mcp)"
+ensure_mcp_server "asana-mcp"
 
 exec node "$SERVER" --slug "$SLUG"

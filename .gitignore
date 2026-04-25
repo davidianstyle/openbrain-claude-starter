@@ -20,3 +20,4 @@
 # Per-user customizations of CLAUDE.md after setup — NOT tracked in the template repo
 # (Users should commit their customized CLAUDE.md to their own private vault repo.)
 
+.tool-versions

@@ -12,7 +12,7 @@ TOKEN_VAR="SLACK_TOKEN_$(echo "$SLUG" | tr '[:lower:]-' '[:upper:]_')"
 TOKEN_VALUE="${!TOKEN_VAR:-}"
 
 [[ -n "$TOKEN_VALUE" ]] || die "$TOKEN_VAR not set in $ENV_FILE (run bootstrap/lib/add-slack-workspace.sh $SLUG)"
-[[ -f "$SERVER" ]] || die "slack-mcp not built: $SERVER (run npm run build in ~/Code/slack-mcp)"
+ensure_mcp_server "slack-mcp"
 
 export "SLACK_TOKEN_$(echo "$SLUG" | tr '[:lower:]-' '[:upper:]_')=$TOKEN_VALUE"
 

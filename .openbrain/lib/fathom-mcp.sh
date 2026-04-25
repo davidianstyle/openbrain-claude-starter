@@ -8,6 +8,6 @@ SERVER="$HOME/Code/fathom-mcp/dist/index.js"
 
 require_env FATHOM_API_KEY
 export FATHOM_API_KEY
-[[ -f "$SERVER" ]] || die "fathom-mcp not built: $SERVER (run npm run build in ~/Code/fathom-mcp)"
+ensure_mcp_server "fathom-mcp"
 
 exec node "$SERVER"
