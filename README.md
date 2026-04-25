@@ -44,7 +44,9 @@ The wizard will:
    - "Add another?" → repeat for as many as you want
    - Same for Slack workspaces, Asana, Fathom
 6. Register every MCP server with Claude Code
-7. Link the pre-commit hook and validate the install
+7. Link the pre-commit hook
+8. Optionally enable auto git sync hooks (commit + push on stop, pull on start)
+9. Validate the install
 
 Restart Claude Code and run `/mcp` to verify everything connected. Run `/daily-brief` as your first skill.
 
@@ -144,7 +146,7 @@ All launched via `~/.config/openbrain/lib/*-mcp.sh` wrappers that source `~/.con
 - **Atomic notes.** One idea per note. If it wants to split, split it.
 - **Links over folders.** Structure comes from `[[wikilinks]]` and MOCs.
 - **Never delete, always archive.** Move to `+ Archive/`, never `rm`.
-- **Git is the sync layer.** No Obsidian Sync. You control when to commit and push.
+- **Git is the sync layer.** No Obsidian Sync. Auto git sync (commit + push on stop, pull on start) is available as an opt-in during setup.
 - **Skills are markdown procedures.** Claude reads them and performs the steps.
 - **People are first-class entities.** Every person gets a note. Interactions link back. Cadence is tracked.
 - **Multi-account by default.** Every external service is wired per-account with routing tags.

@@ -46,7 +46,7 @@ fi
 # -----------------------------------------------------------------------------
 # Step 1: prereqs (auto-installs missing dependencies)
 # -----------------------------------------------------------------------------
-step "1/8 · Checking & installing prerequisites"
+step "1/9 · Checking & installing prerequisites"
 ensure_git
 ok "git: $(command -v git)"
 ensure_python3
@@ -70,7 +70,7 @@ fi
 # -----------------------------------------------------------------------------
 # Step 2: user profile
 # -----------------------------------------------------------------------------
-step "2/8 · Tell me about yourself"
+step "2/9 · Tell me about yourself"
 
 USER_NAME="$(prompt 'Your full name' "${USER:-}")"
 USER_VOICE="$(prompt 'Describe your writing voice in a sentence' 'direct, terse, no filler')"
@@ -78,7 +78,7 @@ USER_VOICE="$(prompt 'Describe your writing voice in a sentence' 'direct, terse,
 # -----------------------------------------------------------------------------
 # Step 3: customize CLAUDE.md
 # -----------------------------------------------------------------------------
-step "3/8 · Customizing CLAUDE.md"
+step "3/9 · Customizing CLAUDE.md"
 
 BOOTSTRAP_DATE="$(date +%Y-%m-%d)"
 CLAUDE_MD="$REPO_ROOT/CLAUDE.md"
@@ -140,7 +140,7 @@ fi
 # -----------------------------------------------------------------------------
 # Step 4: install config dir + env
 # -----------------------------------------------------------------------------
-step "4/8 · Installing ~/.config/openbrain/"
+step "4/9 · Installing ~/.config/openbrain/"
 ensure_env_file
 mkdir -p "$TOKEN_DIR" "$LIB_DIR"
 chmod 700 "$CONFIG_DIR" "$TOKEN_DIR"
@@ -159,7 +159,7 @@ ok "launcher scripts installed"
 # -----------------------------------------------------------------------------
 # Step 5: wire up services
 # -----------------------------------------------------------------------------
-step "5/8 · Wiring up services"
+step "5/9 · Wiring up services"
 
 # Google — optional but recommended
 if yes_no "Wire up Google accounts (Gmail + Calendar + Meet + Drive)?" y; then
@@ -172,7 +172,7 @@ if yes_no "Wire up Google accounts (Gmail + Calendar + Meet + Drive)?" y; then
 fi
 
 # Slack
-if yes_no "Wire up Slack workspaces?" n; then
+if yes_no "Wire up Slack workspaces?" y; then
   while true; do
     sub="$(prompt 'Slack workspace subdomain (e.g. acme → acme.slack.com, blank to finish)')"
     [[ -z "$sub" ]] && break
@@ -181,28 +181,28 @@ if yes_no "Wire up Slack workspaces?" n; then
 fi
 
 # Asana
-if yes_no "Wire up Asana (personal)?" n; then
+if yes_no "Wire up Asana (personal)?" y; then
   "$HERE/lib/add-asana.sh" personal || warn "failed to add personal Asana"
 fi
-if yes_no "Wire up Asana (work)?" n; then
+if yes_no "Wire up Asana (work)?" y; then
   "$HERE/lib/add-asana.sh" work || warn "failed to add work Asana"
 fi
 
 # Fathom
-if yes_no "Wire up Fathom?" n; then
+if yes_no "Wire up Fathom?" y; then
   "$HERE/lib/add-fathom.sh" || warn "failed to add Fathom"
 fi
 
 # -----------------------------------------------------------------------------
 # Step 6: register MCPs in ~/.claude.json
 # -----------------------------------------------------------------------------
-step "6/8 · Registering MCPs with Claude Code"
+step "6/9 · Registering MCPs with Claude Code"
 "$HERE/lib/register-mcps.sh"
 
 # -----------------------------------------------------------------------------
 # Step 7: git hook
 # -----------------------------------------------------------------------------
-step "7/8 · Git hook"
+step "7/9 · Git hook"
 if [[ -d "$REPO_ROOT/.git" ]]; then
   HOOK="$REPO_ROOT/.git/hooks/pre-commit"
   if [[ ! -e "$HOOK" ]] || ! cmp -s "$REPO_ROOT/.openbrain/pre-commit.sh" "$HOOK"; then
@@ -217,9 +217,70 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 8: validate
+# Step 8: auto-commit/auto-pull hooks (opt-in)
 # -----------------------------------------------------------------------------
-step "8/8 · Validating install"
+step "8/9 · Auto git sync hooks"
+cat <<EOF
+OpenBrain can auto-commit and push your vault when Claude Code stops, and
+auto-pull when it starts. This keeps your vault in sync across devices
+without manual git commands.
+
+  • SessionStart hook — git pull --rebase (fail-soft)
+  • Stop hook — regenerate Home.md MOC index, auto-commit, push
+
+EOF
+if yes_no "Enable auto git sync hooks?" n; then
+  SETTINGS_FILE="$REPO_ROOT/.claude/settings.json"
+  mkdir -p "$(dirname "$SETTINGS_FILE")"
+  "$PYTHON_BIN" - "$SETTINGS_FILE" "$REPO_ROOT" <<'PY'
+import json, sys
+from pathlib import Path
+
+settings_path = Path(sys.argv[1])
+repo_root = sys.argv[2]
+
+data = {}
+if settings_path.exists():
+    data = json.loads(settings_path.read_text())
+
+data["hooks"] = {
+    "SessionStart": [
+        {
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": f"{repo_root}/.openbrain/on-start.sh",
+                    "timeout": 30,
+                    "statusMessage": "OpenBrain: pulling latest"
+                }
+            ]
+        }
+    ],
+    "Stop": [
+        {
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": f"{repo_root}/.openbrain/on-stop.sh",
+                    "timeout": 120,
+                    "statusMessage": "OpenBrain: syncing to git"
+                }
+            ]
+        }
+    ]
+}
+
+settings_path.write_text(json.dumps(data, indent=2) + "\n")
+PY
+  ok "auto git sync hooks enabled in .claude/settings.json"
+else
+  ok "skipped — you can enable them later by re-running setup or editing .claude/settings.json"
+fi
+
+# -----------------------------------------------------------------------------
+# Step 9: validate
+# -----------------------------------------------------------------------------
+step "9/9 · Validating install"
 "$HERE/lib/validate.sh" || true
 
 # -----------------------------------------------------------------------------
