@@ -21,8 +21,7 @@ What each step does:
 | 5 | Wire services | loops through each service, calls the matching `add-*.sh` |
 | 6 | Register MCPs | writes `~/.claude.json` via `register-mcps.sh` |
 | 7 | Git pre-commit hook | symlinks `.git/hooks/pre-commit` → `.openbrain/pre-commit.sh` |
-| 8 | Claude Code hooks | writes `.claude/settings.json` with Stop + SessionStart hooks |
-| 9 | Validate | runs `validate.sh` (non-blocking) |
+| 8 | Validate | runs `validate.sh` (non-blocking) |
 
 ## Lifecycle scripts
 

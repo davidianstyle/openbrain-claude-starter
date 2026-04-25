@@ -7,7 +7,6 @@ OpenBrain is a portable template for a [Linking Your Thinking](https://www.linki
 - A fully scaffolded Obsidian vault (Inbox, Spaces, Atlas, Sources, Templates)
 - 21 pre-built Chief of Staff [skills](#skills) (daily brief, inbox triage, capture meeting, etc.)
 - Multi-account MCP wiring for Gmail, Google Calendar, Google Meet, Google Drive/Docs/Sheets, Slack, Asana, and Fathom — any number of accounts per service
-- Automatic git sync via Claude Code Stop/SessionStart hooks
 - A people data model with cadence tracking, interaction logging, and alias resolution
 
 Built for people who want Claude to act on their calendar, email, tasks, and notes the way a human chief of staff would — proactively, with context, and without constant re-briefing.
@@ -45,8 +44,7 @@ The wizard will:
    - "Add another?" → repeat for as many as you want
    - Same for Slack workspaces, Asana, Fathom
 6. Register every MCP server with Claude Code
-7. Wire Stop + SessionStart git-sync hooks
-8. Validate the install
+7. Link the pre-commit hook and validate the install
 
 Restart Claude Code and run `/mcp` to verify everything connected. Run `/daily-brief` as your first skill.
 
@@ -93,7 +91,7 @@ Each script is idempotent — safe to re-run.
 │   └── Templates/            # 14 note templates
 ├── + Archive/                # cold storage
 ├── CLAUDE.md                 # the operating manual Claude reads every session
-├── Home.md                   # front door with auto-regenerated MOC index
+├── Home.md                   # front door with MOC index
 └── .claude/skills/           # 21 Chief of Staff skills
 ```
 
@@ -146,7 +144,7 @@ All launched via `~/.config/openbrain/lib/*-mcp.sh` wrappers that source `~/.con
 - **Atomic notes.** One idea per note. If it wants to split, split it.
 - **Links over folders.** Structure comes from `[[wikilinks]]` and MOCs.
 - **Never delete, always archive.** Move to `+ Archive/`, never `rm`.
-- **Git is the sync layer.** No Obsidian Sync. The Stop hook auto-commits and pushes.
+- **Git is the sync layer.** No Obsidian Sync. You control when to commit and push.
 - **Skills are markdown procedures.** Claude reads them and performs the steps.
 - **People are first-class entities.** Every person gets a note. Interactions link back. Cadence is tracked.
 - **Multi-account by default.** Every external service is wired per-account with routing tags.

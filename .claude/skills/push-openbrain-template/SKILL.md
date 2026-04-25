@@ -21,9 +21,7 @@ The vault is the working bench; the template is what other people clone. Anythin
 | Vault path | Template path | Notes |
 |---|---|---|
 | `.claude/skills/*/SKILL.md` | `.claude/skills/*/SKILL.md` | Procedures — always port improvements |
-| `.openbrain/on-stop.sh` | `.openbrain/on-stop.sh` | Genericize hardcoded vault paths to `$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)` |
-| `.openbrain/on-start.sh` | `.openbrain/on-start.sh` | Same |
-| `.openbrain/pre-commit.sh` | `.openbrain/pre-commit.sh` | Same |
+| `.openbrain/pre-commit.sh` | `.openbrain/pre-commit.sh` | Genericize hardcoded vault paths to `$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)` |
 | `.openbrain/env.example` | `.openbrain/env.example` | Strip real account slugs; keep structure + comments |
 | `+ Extras/Templates/*.md` | `+ Extras/Templates/*.md` | Note templates — port schema changes verbatim (already generic) |
 | `CLAUDE.md` | `CLAUDE.md` | Most delicate — see §"CLAUDE.md handling" below |

@@ -21,9 +21,7 @@ Same in-scope paths as `/push-openbrain-template`, but in the reverse direction 
 | Template path | Vault path | Notes |
 |---|---|---|
 | `.claude/skills/*/SKILL.md` | `.claude/skills/*/SKILL.md` | Procedure improvements |
-| `.openbrain/on-stop.sh` | `.openbrain/on-stop.sh` | Hook scripts |
-| `.openbrain/on-start.sh` | `.openbrain/on-start.sh` | Hook scripts |
-| `.openbrain/pre-commit.sh` | `.openbrain/pre-commit.sh` | Hook scripts |
+| `.openbrain/pre-commit.sh` | `.openbrain/pre-commit.sh` | Pre-commit linter |
 | `.openbrain/env.example` | `.openbrain/env.example` | Secrets template |
 | `+ Extras/Templates/*.md` | `+ Extras/Templates/*.md` | Note templates |
 | `CLAUDE.md` | `CLAUDE.md` | Operating manual (most delicate — see §"CLAUDE.md handling") |

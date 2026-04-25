@@ -10,7 +10,6 @@
 #   6. Loops through each supported service and asks "add an account? [y/N]"
 #   7. Runs register-mcps.sh to wire ~/.claude.json
 #   8. Runs validate.sh to sanity-check the install
-#   9. Prints next steps
 #
 # Re-runnable: the script is defensive. Re-running won't clobber existing
 # secrets — you'll get prompts only for missing or explicitly re-entered values.
@@ -47,7 +46,7 @@ fi
 # -----------------------------------------------------------------------------
 # Step 1: prereqs (auto-installs missing dependencies)
 # -----------------------------------------------------------------------------
-step "1/9 · Checking & installing prerequisites"
+step "1/8 · Checking & installing prerequisites"
 ensure_git
 ok "git: $(command -v git)"
 ensure_python3
@@ -71,7 +70,7 @@ fi
 # -----------------------------------------------------------------------------
 # Step 2: user profile
 # -----------------------------------------------------------------------------
-step "2/9 · Tell me about yourself"
+step "2/8 · Tell me about yourself"
 
 USER_NAME="$(prompt 'Your full name' "${USER:-}")"
 USER_VOICE="$(prompt 'Describe your writing voice in a sentence' 'direct, terse, no filler')"
@@ -79,7 +78,7 @@ USER_VOICE="$(prompt 'Describe your writing voice in a sentence' 'direct, terse,
 # -----------------------------------------------------------------------------
 # Step 3: customize CLAUDE.md
 # -----------------------------------------------------------------------------
-step "3/9 · Customizing CLAUDE.md"
+step "3/8 · Customizing CLAUDE.md"
 
 BOOTSTRAP_DATE="$(date +%Y-%m-%d)"
 CLAUDE_MD="$REPO_ROOT/CLAUDE.md"
@@ -114,8 +113,7 @@ created: $BOOTSTRAP_DATE
 
 # ${USER_NAME}'s OpenBrain
 
-The front door. This file's MOC index auto-regenerates on every Claude Code
-session end.
+The front door. Edit the MOC index below as you add new Maps of Content.
 
 ## Top MOCs
 
@@ -142,7 +140,7 @@ fi
 # -----------------------------------------------------------------------------
 # Step 4: install config dir + env
 # -----------------------------------------------------------------------------
-step "4/9 · Installing ~/.config/openbrain/"
+step "4/8 · Installing ~/.config/openbrain/"
 ensure_env_file
 mkdir -p "$TOKEN_DIR" "$LIB_DIR"
 chmod 700 "$CONFIG_DIR" "$TOKEN_DIR"
@@ -161,7 +159,7 @@ ok "launcher scripts installed"
 # -----------------------------------------------------------------------------
 # Step 5: wire up services
 # -----------------------------------------------------------------------------
-step "5/9 · Wiring up services"
+step "5/8 · Wiring up services"
 
 # Google — optional but recommended
 if yes_no "Wire up Google accounts (Gmail + Calendar + Meet + Drive)?" y; then
@@ -198,13 +196,13 @@ fi
 # -----------------------------------------------------------------------------
 # Step 6: register MCPs in ~/.claude.json
 # -----------------------------------------------------------------------------
-step "6/9 · Registering MCPs with Claude Code"
+step "6/8 · Registering MCPs with Claude Code"
 "$HERE/lib/register-mcps.sh"
 
 # -----------------------------------------------------------------------------
 # Step 7: git hook
 # -----------------------------------------------------------------------------
-step "7/9 · Git hook"
+step "7/8 · Git hook"
 if [[ -d "$REPO_ROOT/.git" ]]; then
   HOOK="$REPO_ROOT/.git/hooks/pre-commit"
   if [[ ! -e "$HOOK" ]] || ! cmp -s "$REPO_ROOT/.openbrain/pre-commit.sh" "$HOOK"; then
@@ -219,48 +217,9 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 8: wire Claude Code Stop + SessionStart hooks
+# Step 8: validate
 # -----------------------------------------------------------------------------
-step "8/9 · Wiring Claude Code Stop + SessionStart hooks"
-CLAUDE_SETTINGS="$REPO_ROOT/.claude/settings.json"
-mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
-"$PYTHON_BIN" - "$CLAUDE_SETTINGS" "$REPO_ROOT" <<'PY'
-import json, os
-from pathlib import Path
-settings_path = Path(os.sys.argv[1])
-repo_root = os.sys.argv[2]
-data = {}
-if settings_path.exists():
-    try:
-        data = json.loads(settings_path.read_text())
-    except Exception:
-        pass
-hooks = data.setdefault("hooks", {})
-hooks["SessionStart"] = [{
-    "hooks": [{
-        "type": "command",
-        "command": f"{repo_root}/.openbrain/on-start.sh",
-        "timeout": 30,
-        "statusMessage": "OpenBrain: pulling latest",
-    }]
-}]
-hooks["Stop"] = [{
-    "hooks": [{
-        "type": "command",
-        "command": f"{repo_root}/.openbrain/on-stop.sh",
-        "timeout": 120,
-        "statusMessage": "OpenBrain: syncing to git",
-    }]
-}]
-settings_path.write_text(json.dumps(data, indent=2) + "\n")
-print(f"[openbrain] wrote {settings_path}")
-PY
-ok "Claude Code hooks wired in .claude/settings.json"
-
-# -----------------------------------------------------------------------------
-# Step 9: validate
-# -----------------------------------------------------------------------------
-step "9/9 · Validating install"
+step "8/8 · Validating install"
 "$HERE/lib/validate.sh" || true
 
 # -----------------------------------------------------------------------------
@@ -271,7 +230,7 @@ cat <<EOF
 Next steps:
 
   1. ${_C_BOLD}Restart Claude Code${_C_RESET} in this vault directory so it picks up
-     the new MCP servers and Stop/SessionStart hooks.
+     the new MCP servers.
 
   2. Inside a fresh Claude Code session, run:
        ${_C_CYAN}/mcp${_C_RESET}               # verify every server shows "ready"
