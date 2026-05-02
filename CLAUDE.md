@@ -76,10 +76,18 @@ Asana MCP servers are registered per workspace. The bootstrap supports any combi
 
 ## 6. Writing assistant guidance
 
-- **Drafting:** match {{USER_NAME}}'s voice — {{USER_VOICE}}.
+This section is the source of truth for how drafted communications should sound. The drafter skills (`/follow-up-draft`, `/daily-brief`, `/process-inbox`) read this section and apply it. To (re)derive these bullets from your real sent messages, run `/learn-writing-style`.
+
+- **Drafting voice (general):** match {{USER_NAME}}'s voice — {{USER_VOICE}}. Default until you run `/learn-writing-style`: direct and terse, no filler, no preamble; lead with the ask or the answer.
+- **Em-dashes:** use sparingly in drafted communications. LLM-generated messages tend to overuse them. `/learn-writing-style` will detect whether your sent messages avoid em-dashes entirely and, if so, replace this with a hard "never use" rule.
+- **Email style:** complete sentences with proper capitalization. Sign off with your preferred closer (e.g. `Best, <your-first-name>`). Each paragraph is a single unbroken line; only use blank lines (`\n\n`) between paragraphs. Gmail preserves hard line breaks within a paragraph and renders them as a narrow column instead of reflowing, so never insert `\n` mid-paragraph.
+- **Slack style — small audiences (DMs, group DMs, thread replies):** match the thread's existing tone, leaning casual. Skip greetings and sign-offs; just the substance. Use markdown (`*bold*`, backtick code, bullets) where it adds clarity.
+- **Slack style — large audiences (broadcast channels, announcements):** more formal register. Bullets and bold for structure on longer posts. Lead with a one-line summary. Still no greetings/sign-offs.
 - **Expanding stubs:** if a note is a one-liner or has `#stub`, offer to expand it using linked context and related notes.
 - **Surfacing related notes:** use Grep / wikilink search across `+ Atlas/` and `+ Spaces/` to find genuinely relevant prior thinking before writing anything new.
 - **Never invent facts** or create fake citations. If you need a source, say so.
+
+_Default profile shipped with the starter. Run `/learn-writing-style` to derive these bullets from your real sent mail and Slack messages._
 
 ## 7. Research mode
 
@@ -242,6 +250,7 @@ Skills live in `.claude/skills/<name>/SKILL.md` (vault-local, portable with the 
 | `/log-organization` | Create an organization note with key people and places at `+ Atlas/Organizations/`. |
 | `/log-quote` | Save a quote with attribution and source link at `+ Atlas/Quotes/`. |
 | `/follow-up-draft` | Draft a reply/nudge for the right account. Saves as draft, never sends. Also invoked in batch by `/daily-brief` and `/process-inbox` for actionable "Needs a reply" items. |
+| `/learn-writing-style` | Scan your sent email + Slack messages to derive a personalized writing-style profile (email vs Slack, by audience size). Updates `CLAUDE.md §6` in place. Run after initial bootstrap. |
 | `/what-am-i-missing` | Surface overdue tasks, stale commitments, cadence misses, unanswered mail. |
 | `/people-audit` | Cadence health report + regenerate `+ Spaces/People.md` grouping. |
 | `/people-sync` | Discovery pass across Gmail/Calendar/Slack — auto-updates `last_contact` on known people, stages unknowns in `+ Inbox/people-candidates/`, proposes alias merges. |

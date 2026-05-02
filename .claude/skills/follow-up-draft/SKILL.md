@@ -20,7 +20,7 @@ description: Draft a follow-up email or Slack message for a given person or thre
    - **Email:** match the person's primary email domain to the best `google_*` account slug. If the person is in `relationship: [work]`, default to the work `google_*` MCP (see CLAUDE.md §12 for the configured work Google slug).
    - **Slack:** use the workspace from the permalink, or from the person's `slack:` frontmatter.
 3. **Gather context.** Pull the last 1–2 interactions from `+ Atlas/Interactions/`, the open commitments section from the person note, and the last email/Slack thread excerpt.
-4. **Draft the message.** Match the user's voice — direct, terse, no filler. Lead with the ask. For email, include subject line. For Slack, no subject. **Formatting: write each paragraph as a single unbroken line. Only use blank lines (`\n\n`) between paragraphs. Never insert `\n` within a paragraph — Gmail preserves hard line breaks and renders them as a narrow column instead of reflowing.**
+4. **Draft the message.** Apply the writing-style profile in CLAUDE.md §6 (general voice, em-dash rule, email vs Slack, audience-size split). For email: include a subject line. For Slack: no subject. All other formatting and tone choices come from §6. (To populate or refresh §6 from your real sent messages, run `/learn-writing-style`.)
 5. **Save as draft.**
    - **Email:** call `google_gmail_draft_email` on the matching `google_*` MCP. Report the draft id.
    - **Slack:** call `slack_send_message_draft` (or equivalent) on the matching `slack_*` MCP. Report the draft/scheduled id.

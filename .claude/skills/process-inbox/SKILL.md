@@ -23,7 +23,7 @@ Run the CLAUDE.md §4 inbox triage workflow across all sources.
    For each actionable item:
    1. **Resolve account + thread.** Use the `google_*` MCP that surfaced the message, or the `slack_*` workspace.
    2. **Gather context.** Read the full thread via `google_gmail_read_email` on the matching `google_*` MCP (using the message ID from step 2). Check `+ Atlas/People/` for the sender's person note — pull open commitments, recent interactions, and relationship context. For Slack, read the thread via `slack_<slug>_conversations_replies`.
-   3. **Compose draft.** Match the user's voice (see CLAUDE.md §6). Lead with the ask or the answer. For email: use `Re: <original subject>`. For Slack: no subject.
+   3. **Compose draft.** Apply the writing-style profile in CLAUDE.md §6 (general voice, em-dash rule, email vs Slack, audience-size split). For email: use `Re: <original subject>`. For Slack: no subject. All other formatting and tone choices come from §6. (To populate or refresh §6 from your real sent messages, run `/learn-writing-style`.)
    4. **Save draft.**
       - **Email:** `google_gmail_draft_email` on the matching `google_*` MCP with `threadId` + `inReplyTo` set so it appears as an in-thread reply.
       - **Slack:** `mcp__claude_ai_Slack__slack_send_message_draft` with `channel_id` + `thread_ts` if replying in-thread. (This is the one approved use of the deprecated connector — see CLAUDE.md §9.)
