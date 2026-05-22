@@ -140,21 +140,11 @@ fi
 # -----------------------------------------------------------------------------
 # Step 4: install config dir + env
 # -----------------------------------------------------------------------------
+# The shared-layer dir setup + launcher install lives in lib/minimal-init.sh
+# so external consumers (e.g. doro-events) can re-use it without inheriting
+# the rest of this wizard. Inlined logic was equivalent; see commit history.
 step "4/9 · Installing ~/.config/openbrain/"
-ensure_env_file
-mkdir -p "$TOKEN_DIR" "$LIB_DIR"
-chmod 700 "$CONFIG_DIR" "$TOKEN_DIR"
-chmod 755 "$LIB_DIR"
-chmod 600 "$ENV_FILE"
-ok "config dir: $CONFIG_DIR"
-
-# Copy launchers
-for f in "$REPO_ROOT/.openbrain/lib/"*.sh; do
-  dest="$LIB_DIR/$(basename "$f")"
-  cp "$f" "$dest"
-  chmod 755 "$dest"
-done
-ok "launcher scripts installed"
+"$HERE/lib/minimal-init.sh"
 
 # -----------------------------------------------------------------------------
 # Step 5: wire up services
