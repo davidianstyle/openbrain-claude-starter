@@ -29,7 +29,10 @@ All live in `bootstrap/lib/`. Safe to run directly any time.
 
 ### `setup-google-oauth.sh`
 
-One-time GCP Desktop OAuth client setup. Walks you through enabling the 6 Google APIs, creating the OAuth consent screen, and generating a Desktop client ID. Stores `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `~/.config/openbrain/.env` and writes `~/.config/openbrain/tokens/oauth-client.json`.
+One-time setup of the Google OAuth client. Stores `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `~/.config/openbrain/.env` and writes `~/.config/openbrain/tokens/oauth-client.json`. It first asks whether you're reusing an existing client, which picks one of two paths:
+
+- **Reusing a shared app** (most common when joining a team that already has one) — answer **yes**. You skip the Google Cloud Console entirely; just paste the **client ID** and **client secret** someone hands you (e.g. from a shared password manager). Use this if your team already set up a Google app — you don't need to touch any Google developer settings.
+- **Creating a new app** — answer **no**, and the script walks you through the one-time Google Cloud Console steps (enable the 6 APIs, configure the consent screen, create a Desktop client ID), then prompts for the two values it generates.
 
 Re-run to rotate the client credentials.
 

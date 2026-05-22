@@ -2,6 +2,12 @@
 # One-time Google Cloud OAuth setup.
 # Walks the user through GCP console steps and stores client_id/secret in .env.
 #
+# Supports two flows:
+#   • New app  — prints the full GCP Console walkthrough, then prompts for the
+#     client_id/secret the user just minted.
+#   • Existing app — skips the walkthrough; user pastes credentials they
+#     already have (e.g., from a team password manager / shared app).
+#
 # Safe to re-run: if credentials are already in .env, asks before overwriting.
 set -euo pipefail
 
@@ -19,8 +25,13 @@ if [[ -n "${GOOGLE_OAUTH_CLIENT_ID:-}" && -n "${GOOGLE_OAUTH_CLIENT_SECRET:-}" ]
   fi
 fi
 
-step "Google Cloud Console — one-time setup"
-cat <<'EOF'
+# Skip the GCP walkthrough for users reusing an existing OAuth client
+# (e.g., a shared team app). They still get the two paste prompts below.
+if yes_no "Reusing an existing OAuth client (e.g., a shared team app)?" n; then
+  info "Skipping Google Cloud Console walkthrough. Paste credentials from your password manager when prompted."
+else
+  step "Google Cloud Console — one-time setup"
+  cat <<'EOF'
 
 Follow these steps in your browser. Keep this terminal open; you'll paste
 two values back at the end.
@@ -57,6 +68,7 @@ two values back at the end.
      to mint a new one via "+ Add secret".
 
 EOF
+fi
 
 CLIENT_ID="$(prompt 'Paste OAuth client ID')"
 [[ -n "$CLIENT_ID" ]] || die "client ID cannot be empty"
