@@ -76,7 +76,7 @@ Asana MCP servers are registered per workspace. The bootstrap supports any combi
 
 ## 6. Writing assistant guidance
 
-This section is the source of truth for how drafted communications should sound. The drafter skills (`/follow-up-draft`, `/daily-brief`, `/process-inbox`) read this section and apply it. To (re)derive these bullets from your real sent messages, run `/learn-writing-style`.
+This section is the source of truth for how drafted communications should sound. The drafter skills (`/draft-follow-up`, `/daily-brief`, `/process-inbox`) read this section and apply it. To (re)derive these bullets from your real sent messages, run `/learn-writing-style`.
 
 - **Drafting voice (general):** match {{USER_NAME}}'s voice — {{USER_VOICE}}. Default until you run `/learn-writing-style`: direct and terse, no filler, no preamble; lead with the ask or the answer.
 - **Em-dashes:** use sparingly in drafted communications. LLM-generated messages tend to overuse them. `/learn-writing-style` will detect whether your sent messages avoid em-dashes entirely and, if so, replace this with a hard "never use" rule.
@@ -248,7 +248,7 @@ Skills live in `.claude/skills/<name>/SKILL.md` (vault-local, portable with the 
 | `/log-place` | Create a place note at `+ Atlas/Places/`. Auto-seeds `address:` + cross-links to people/orgs from recent calendar activity unless run in `quick` mode. |
 | `/log-organization` | Create an organization note with key people and places at `+ Atlas/Organizations/`. |
 | `/log-quote` | Save a quote with attribution and source link at `+ Atlas/Quotes/`. |
-| `/follow-up-draft` | Draft a reply/nudge for the right account. Saves as draft, never sends. Also invoked in batch by `/daily-brief` and `/process-inbox` for actionable "Needs a reply" items. |
+| `/draft-follow-up` | Draft a reply/nudge for the right account. Saves as draft, never sends. Also invoked in batch by `/daily-brief` and `/process-inbox` for actionable "Needs a reply" items. |
 | `/learn-writing-style` | Scan your sent email + Slack messages to derive a personalized writing-style profile (email vs Slack, by audience size). Updates `CLAUDE.md §6` in place. Run after initial bootstrap. |
 | `/what-am-i-missing` | Surface overdue tasks, stale commitments, cadence misses, unanswered mail. |
 | `/people-audit` | Cadence health report + regenerate `+ Spaces/People.md` grouping. |

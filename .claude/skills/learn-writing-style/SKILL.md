@@ -5,7 +5,7 @@ description: Scan sent messages across configured Google and Slack accounts to d
 
 # /learn-writing-style
 
-Derive your writing-style profile from your real outbound messages and write it into `CLAUDE.md §6`. The drafter skills (`/follow-up-draft`, `/daily-brief`, `/process-inbox`) read §6 as the source of truth, so updating §6 propagates automatically.
+Derive your writing-style profile from your real outbound messages and write it into `CLAUDE.md §6`. The drafter skills (`/draft-follow-up`, `/daily-brief`, `/process-inbox`) read §6 as the source of truth, so updating §6 propagates automatically.
 
 This skill is interactive: it shows the derived profile and waits for confirmation before writing.
 

@@ -1,9 +1,9 @@
 ---
-name: follow-up-draft
+name: draft-follow-up
 description: Draft a follow-up email or Slack message for a given person or thread, using the correct account. Never sends.
 ---
 
-# /follow-up-draft
+# /draft-follow-up
 
 ## Inputs
 

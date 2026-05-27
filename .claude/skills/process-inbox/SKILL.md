@@ -33,23 +33,23 @@ Run the CLAUDE.md §4 inbox triage workflow across all sources.
    - **Interactive:** list the meetings found and ask which to capture before proceeding. Shape: "Found N past meetings today not yet captured: [list]. Capture all / Select / Skip?"
    - **Scheduled:** auto-capture all without confirmation.
 5. **Flag items needing a reply.** For each Gmail/Slack item, infer whether the user is the next actor (question addressed to them, explicit request, etc.). Surface those in a "Needs reply" section.
-5b. **Draft replies for actionable threads.** For each item flagged in step 5 where the user is the next actor, invoke `/follow-up-draft` to produce the draft. `/follow-up-draft` is the single source of truth for drafting mechanics (account selection, writing-style application, save tool selection, vault trail). This skill only decides *which* items get drafted and handles batch gating; it does not inline the drafting logic.
+5b. **Draft replies for actionable threads.** For each item flagged in step 5 where the user is the next actor, invoke `/draft-follow-up` to produce the draft. `/draft-follow-up` is the single source of truth for drafting mechanics (account selection, writing-style application, save tool selection, vault trail). This skill only decides *which* items get drafted and handles batch gating; it does not inline the drafting logic.
 
-   **Skip list** (do not invoke `/follow-up-draft` for these):
+   **Skip list** (do not invoke `/draft-follow-up` for these):
    - Delegated/FYI items (care team, ops auto-alerts)
    - Observer-only threads
    - Automated notifications (Asana digests, Dependabot, commercial mailing lists)
 
    **For each remaining actionable item:**
-   1. Build the `/follow-up-draft` input: pass the gmail thread id (for email) or slack permalink (for Slack) as `$1`, and a one-line intent hint as `$2` derived from the thread.
-   2. Invoke `/follow-up-draft`. It will resolve the account, pull person context, apply the §6 writing style, save the draft via the matching `gmail_draft_email` or `slack_drafts_create` tool, and log the vault trail under the person's `## Threads` section.
+   1. Build the `/draft-follow-up` input: pass the gmail thread id (for email) or slack permalink (for Slack) as `$1`, and a one-line intent hint as `$2` derived from the thread.
+   2. Invoke `/draft-follow-up`. It will resolve the account, pull person context, apply the §6 writing style, save the draft via the matching `gmail_draft_email` or `slack_drafts_create` tool, and log the vault trail under the person's `## Threads` section.
    3. Collect the returned draft id and account into this skill's "Drafted replies" output section.
 
    **Interactive vs. scheduled behavior:**
-   - **Interactive (default):** before invoking `/follow-up-draft` for each item, show the proposed intent hint and ask for approval. Shape: "Draft this reply to [sender] re: [subject]? [Yes / Skip / Edit intent]"
-   - **Scheduled:** invoke `/follow-up-draft` without confirmation (drafts are not sent, so this is safe — the user reviews and sends from Gmail/Slack).
+   - **Interactive (default):** before invoking `/draft-follow-up` for each item, show the proposed intent hint and ask for approval. Shape: "Draft this reply to [sender] re: [subject]? [Yes / Skip / Edit intent]"
+   - **Scheduled:** invoke `/draft-follow-up` without confirmation (drafts are not sent, so this is safe — the user reviews and sends from Gmail/Slack).
 
-   **Parallelization:** `/follow-up-draft` invocations across distinct threads are independent. Fan out all invocations in a single tool-use block per batch.
+   **Parallelization:** `/draft-follow-up` invocations across distinct threads are independent. Fan out all invocations in a single tool-use block per batch.
 6. **People detection pass.** From senders/recipients of the Gmail sweep and counterparties of the Slack sweep, match identifiers against `+ Atlas/People/*.md` (`emails`, `slack`, `title`, `aliases`). Apply `/sync-people`'s noise filters (step 4) and its Bucket C staging threshold (step 7) verbatim — `/sync-people` is the single source of truth for these rules. Note that `/process-inbox` does not read calendar, so the "calendar event where the user is also an attendee" branch of the threshold is simply unavailable here; a Gmail thread where the unknown human directly replied to the user (or vice versa) counts as the Gmail equivalent of a direct meeting for threshold purposes.
    - In **interactive mode**: surface qualifying unknowns in a "People candidates" section — do not auto-stage.
    - In **scheduled mode**: stage a stub at `+ Inbox/people-candidates/<Full Name>.md` using `/sync-people`'s stub format (step 10), appending evidence if the stub already exists.

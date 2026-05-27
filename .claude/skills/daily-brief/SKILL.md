@@ -28,19 +28,19 @@ Assemble the user's daily briefing for today (or a date passed as `$1`). Creates
 4. **Overdue tasks.** For each configured Asana workspace (`asana_personal`, `asana_work`), `asana_get_my_tasks` with `completed_since=now`, `opt_fields=name,due_on,due_at,completed,assignee_section.name,projects.name,permalink_url,recurrence`, and post-filter to due date < today. The `recurrence` field is mandatory — see "Asana display ordering" below for why.
 5. **Stale relationships.** Grep `+ Atlas/People/*.md` for notes whose `last_contact` is older than their `cadence` allows (weekly: > 7d, monthly: > 30d, quarterly: > 90d, asneeded: never stale). Cap at 5.
 6. **People detection pass.** From the calendar attendees + priority mail senders/recipients + Slack counterparties gathered in steps 1–3, check each identifier against `+ Atlas/People/*.md` frontmatter (`emails`, `slack`, `title`, `aliases`). Unknown humans (after filtering no-reply/bots/resources per `/sync-people` rules) become a **New faces** candidate list — do not stage stubs from this skill; just surface them. Recommend `/sync-people` if the list is non-empty.
-6b. **Draft replies for actionable threads.** After steps 1–6, invoke `/follow-up-draft` for each "Needs a reply" item where the user is the next actor. `/follow-up-draft` is the single source of truth for drafting mechanics (account selection, writing-style application, save tool, vault trail). This skill only decides *which* items get drafted.
+6b. **Draft replies for actionable threads.** After steps 1–6, invoke `/draft-follow-up` for each "Needs a reply" item where the user is the next actor. `/draft-follow-up` is the single source of truth for drafting mechanics (account selection, writing-style application, save tool, vault trail). This skill only decides *which* items get drafted.
 
-   **Skip list** (do not invoke `/follow-up-draft` for these):
+   **Skip list** (do not invoke `/draft-follow-up` for these):
    - Items classified as `Delegated / FYI` (care team, ops auto-alerts)
    - Observer-only threads
    - Automated notifications (Asana digests, Dependabot, commercial mailing lists)
 
    **For each remaining actionable item:**
-   1. Build the `/follow-up-draft` input: pass the gmail thread id (for email) or slack permalink (for Slack) as `$1`, and a one-line intent hint as `$2` derived from the thread.
-   2. Invoke `/follow-up-draft`. It will resolve the account, pull person context, apply the §6 writing style, save the draft via the matching `gmail_draft_email` or `slack_drafts_create` tool, and log the vault trail under the person's `## Threads` section.
+   1. Build the `/draft-follow-up` input: pass the gmail thread id (for email) or slack permalink (for Slack) as `$1`, and a one-line intent hint as `$2` derived from the thread.
+   2. Invoke `/draft-follow-up`. It will resolve the account, pull person context, apply the §6 writing style, save the draft via the matching `gmail_draft_email` or `slack_drafts_create` tool, and log the vault trail under the person's `## Threads` section.
    3. Collect the returned draft id and account into this skill's "Drafted replies" output section (step 7).
 
-   **Parallelization:** `/follow-up-draft` invocations across distinct threads are independent. Fan out all invocations in a single tool-use block.
+   **Parallelization:** `/draft-follow-up` invocations across distinct threads are independent. Fan out all invocations in a single tool-use block.
 
 7. **Compose the daily note.** If `+ Atlas/Daily/<date>.md` does not exist, scaffold from `+ Extras/Templates/Daily.md`. If a `## Morning brief` section already exists in the note, **replace its body in place** (find the `## Morning brief` heading and overwrite everything up to the next H2 or EOF). Otherwise insert a new `## Morning brief` section near the top. Contents:
    - **Today's calendar** (merged timeline, grouped bullet list, `[HH:MM–HH:MM] Title · account-slug · other attendees if any`)
