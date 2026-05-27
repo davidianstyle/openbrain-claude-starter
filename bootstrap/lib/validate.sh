@@ -58,7 +58,7 @@ else
 fi
 
 step "Installed launchers at $LIB_DIR"
-for f in asana-mcp.sh gmail-mcp.sh gcal-mcp.sh gmeet-mcp.sh gdrive-mcp.sh slack-mcp.sh fathom-mcp.sh _common.sh; do
+for f in asana-mcp.sh google-mcp.sh slack-mcp.sh fathom-mcp.sh _common.sh; do
   if [[ -x "$LIB_DIR/$f" ]]; then
     ok "$f"
   else

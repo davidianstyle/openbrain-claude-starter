@@ -126,8 +126,7 @@ When a template in `+ Extras/Templates/` gains or removes a required frontmatter
 - **Never push to Asana without a `#asana/*` tag.**
 - **Never `git commit` or `git push` unless the user explicitly asks.** Git operations are the user's responsibility.
 - **Never modify `~/.config/openbrain/.env`** or echo its contents.
-- **Never use deprecated remote connectors** — `mcp__claude_ai_Asana__*`, `mcp__claude_ai_Google_Calendar__*`, `mcp__gmail__*`, `mcp__claude_ai_Slack__*` are single-account and bypass the multi-account routing defined in §11. Use the local `asana_*` / `google_*` / `slack_*` MCPs instead.
-  - **Exception:** `mcp__claude_ai_Slack__slack_send_message_draft` may be used for saving Slack drafts, since the local `slack_*` MCPs do not support draft creation. This is the only approved use of the deprecated connector. Never use it for sending messages or any other operation.
+- **Never use deprecated remote connectors** — `mcp__claude_ai_Asana__*`, `mcp__claude_ai_Google_Calendar__*`, `mcp__gmail__*`, `mcp__claude_ai_Slack__*` are single-account and bypass the multi-account routing defined in §11. Use the local `asana_*` / `google_*` / `slack_*` MCPs instead. The local `slack_*` MCPs now fully support draft creation via `slack_drafts_create` (one draft per channel; use `slack_drafts_edit` if one already exists), so there is no longer any approved fallback to the deprecated connector.
 - **Never commit real secrets** to `.openbrain/env.example`. It is the tracked template; the real `.env` lives at `~/.config/openbrain/.env` (mode 600) and is out of repo.
 
 ## 10. Maintenance automation
@@ -246,7 +245,7 @@ Skills live in `.claude/skills/<name>/SKILL.md` (vault-local, portable with the 
 | `/log-idea` | Create an idea note at `+ Atlas/Ideas/`. |
 | `/log-decision` | Record a decision with context, reasoning, and alternatives at `+ Atlas/Decisions/`. |
 | `/log-goal` | Create a goal note with definition of done and linked projects at `+ Atlas/Goals/`. |
-| `/log-place` | Create a place note at `+ Atlas/Places/`. |
+| `/log-place` | Create a place note at `+ Atlas/Places/`. Auto-seeds `address:` + cross-links to people/orgs from recent calendar activity unless run in `quick` mode. |
 | `/log-organization` | Create an organization note with key people and places at `+ Atlas/Organizations/`. |
 | `/log-quote` | Save a quote with attribution and source link at `+ Atlas/Quotes/`. |
 | `/follow-up-draft` | Draft a reply/nudge for the right account. Saves as draft, never sends. Also invoked in batch by `/daily-brief` and `/process-inbox` for actionable "Needs a reply" items. |
@@ -254,16 +253,19 @@ Skills live in `.claude/skills/<name>/SKILL.md` (vault-local, portable with the 
 | `/what-am-i-missing` | Surface overdue tasks, stale commitments, cadence misses, unanswered mail. |
 | `/people-audit` | Cadence health report + regenerate `+ Spaces/People.md` grouping. |
 | `/sync-people` | Discovery pass across Gmail/Calendar/Slack — auto-updates `last_contact` on known people, stages unknowns in `+ Inbox/people-candidates/`, proposes alias merges. |
+| `/sync-organizations` | Discovery pass across Gmail/Calendar/Slack/Fathom — finds organizations not yet captured in `+ Atlas/Organizations/`, stages candidates in `+ Inbox/org-candidates/`. Mirrors `/sync-people` for the org facet. |
+| `/sync-places` | Discovery pass across Google Calendar — finds physical places not yet captured in `+ Atlas/Places/`, stages candidates in `+ Inbox/place-candidates/`. Facet-aware: surfaces when an existing Org should also get a Place note. |
 | `/weekly-review` | Monday synthesis → `+ Atlas/Weekly Reviews/<ISO-week>.md`. |
-| `/push-openbrain-claude-starter` | Genericize vault improvements, open a PR against the upstream openbrain-claude-starter repo. |
-| `/pull-openbrain-claude-starter` | Pull latest template changes into the vault, interactively apply improvements. |
 | `/asana` | Quick view of tasks due in the next 7 days across configured workspaces, with interactive check-off. |
+| `/pull-openbrain-template` | Pull latest changes from the upstream starter, diff against this vault's infrastructure, and interactively apply each change. |
+| `/push-openbrain-template` | Genericize vault improvements and open a PR against the upstream starter — strips personal data, diffs, and creates the GitHub PR after review. |
 
 Skills are markdown procedures only — they describe which MCP tools to call and which files to read/write. They do not execute code; Claude reads the SKILL.md and performs the steps.
 
 ## 14. Tool usage notes
 
-- **Slack write operations:** The local `slack_*` MCPs support `slack_conversations_add_message` natively. Use this tool for sending messages — do not fall back to the deprecated `mcp__claude_ai_Slack__*` remote connector.
+- **Slack write operations:** The local `slack_*` MCPs support both message sending (`conversations_add_message`) and draft creation (`slack_drafts_create` / `slack_drafts_edit` / `slack_drafts_delete`) natively. Use these for all Slack writes — do not fall back to the deprecated `mcp__claude_ai_Slack__*` remote connector.
+  - **DM channel resolution.** `slack_drafts_create` needs a real channel id (`C...` for channels, `D...` for IMs). For an existing IM, look it up via `slack_channels_list types=im` matched against the user id from `slack_users_search`. Opening a brand-new DM via `slack_conversations_open` currently fails with `missing_scope` on the OpenBrain Slack OAuth grant; if no existing IM channel is found, surface the limitation rather than substituting a deprecated connector.
 - **Before recommending any Asana task, Slack message, or Google Doc edit**, verify the target still exists (the state may have changed since the last session).
 
 ## 15. Deployment

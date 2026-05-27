@@ -69,12 +69,11 @@ ensure_node_on_path() {
 # Install a shim that intercepts `open` (and sets $BROWSER) so MCP packages
 # cannot silently launch OAuth browser tabs every time Claude Code starts.
 #
-# Several Google MCPs (@cocal/google-calendar-mcp, @gongrzhe/server-gmail-autoauth-mcp,
-# etc.) attempt an OAuth flow on startup when their token cache is missing or
-# stale. Without this shim, that flow pops up real browser windows for every
-# configured account on every session start. Tokens are managed out-of-band
-# via bootstrap-google.sh / add-google-account.sh — re-run those scripts when
-# a refresh actually fails.
+# Defensive: some third-party MCPs attempt an OAuth flow on startup when
+# their token cache is missing or stale, popping browser windows for every
+# configured account on every session. Tokens are managed out-of-band via
+# bootstrap/lib/add-google-account.sh and bootstrap/lib/refresh-google-tokens.sh
+# — re-run those when a refresh actually fails.
 install_browser_suppressor() {
   local shim_dir="$HOME/.config/openbrain/lib/shims"
   local shim="$shim_dir/open"
@@ -85,8 +84,8 @@ install_browser_suppressor() {
 # OpenBrain browser-launch suppressor. Any MCP package that tries to
 # launch a browser via `open <url>` (macOS) or $BROWSER hits this shim
 # and fails non-interactively instead of popping windows on every
-# Claude Code startup. Re-run bootstrap-google.sh to re-auth when a
-# real token refresh failure happens.
+# Claude Code startup. Re-run bootstrap/lib/refresh-google-tokens.sh
+# to re-auth when a real token refresh failure happens.
 echo "openbrain: suppressed browser launch ($*)" >&2
 exit 1
 SHIM

@@ -18,27 +18,29 @@ Assemble the user's daily briefing for today (or a date passed as `$1`). Creates
 > **Parallelization:** steps 1–6 are all independent read-only gathers. Fan out **every** MCP call — all `google_*` accounts, all `slack_*` workspaces, all configured Asana workspaces, and Fathom — in a single tool-use block. Do not serialize across accounts or across steps.
 
 1. **Calendar sweep.** For each `google_*` MCP, call `google_calendar_list_events` for the target date (00:00 → 23:59 local). Merge into a single timeline; tag each event with the owning account slug. Collapse duplicate events that appear on multiple calendars (same title + time).
-1b. **Fathom recordings.** Call `mcp__fathom__list_meetings` for meetings in the last 24h. For each, note title, participants, and whether a summary is available. Surface under a **Recent recordings** section in the brief — title, attendees, and a `fathom:<meeting-id>` reference the user can pass to `/capture-meeting` if they haven't already processed it.
-2. **Priority mail.** For each `google_*` MCP, `google_gmail_search_emails` with `is:unread newer_than:2d (is:important OR is:starred OR label:^iim)`. Cap at 5 per account. Capture subject, sender, account slug.
-3. **Slack attention.** For each `slack_*` MCP, search for mentions of the user in the last 24h and list unread DMs. **Call `slack_conversations_unreads` with `limit: 200`** — the `limit` param caps **channels scanned**, not unreads returned. With small limits, DMs in lower-priority channels get missed entirely. After fetching, summarize the top 10 most relevant unread items.
+1b. **Fathom recordings.** Call `mcp__fathom__fathom_list_meetings` for meetings in the last 24h. For each, note title, participants, and whether a summary is available. Surface under a **Recent recordings** section in the brief — title, attendees, and a `fathom:<meeting-id>` reference the user can pass to `/capture-meeting` if they haven't already processed it.
+2. **Priority mail.** For each `google_*` MCP, `google_gmail_search_emails` with `is:unread newer_than:2d (is:important OR is:starred OR label:^iim)`. Cap at 10 per account. Capture subject, sender, account slug.
+3. **Slack attention.** For each `slack_*` MCP, fetch **two complementary sources** in the same parallel block:
+   - `slack_conversations_unreads` with `limit: 200` — top-level unread channels and DMs. The `limit` param caps **channels scanned**, not unreads returned, so smaller values miss DMs in lower-priority channels.
+   - `slack_my_mentions` with `hours: 24` — explicit `<@me>` mentions across channels and thread replies. **This is required**: `conversations_unreads` only checks each channel's top-level `unread_count` (from `conversations.info`), which excludes thread replies and mentions in channels you've already read. Without this call, @mentions in threads silently disappear.
+
+   After fetching both, dedupe and summarize the top 10 most relevant items.
 4. **Overdue tasks.** For each configured Asana workspace (`asana_personal`, `asana_work`), `asana_get_my_tasks` with `completed_since=now`, `opt_fields=name,due_on,due_at,completed,assignee_section.name,projects.name,permalink_url,recurrence`, and post-filter to due date < today. The `recurrence` field is mandatory — see "Asana display ordering" below for why.
 5. **Stale relationships.** Grep `+ Atlas/People/*.md` for notes whose `last_contact` is older than their `cadence` allows (weekly: > 7d, monthly: > 30d, quarterly: > 90d, asneeded: never stale). Cap at 5.
 6. **People detection pass.** From the calendar attendees + priority mail senders/recipients + Slack counterparties gathered in steps 1–3, check each identifier against `+ Atlas/People/*.md` frontmatter (`emails`, `slack`, `title`, `aliases`). Unknown humans (after filtering no-reply/bots/resources per `/sync-people` rules) become a **New faces** candidate list — do not stage stubs from this skill; just surface them. Recommend `/sync-people` if the list is non-empty.
-6b. **Draft replies for actionable threads.** After steps 1–6, draft responses for "Needs a reply" items where the user is the next actor. Skip:
+6b. **Draft replies for actionable threads.** After steps 1–6, invoke `/follow-up-draft` for each "Needs a reply" item where the user is the next actor. `/follow-up-draft` is the single source of truth for drafting mechanics (account selection, writing-style application, save tool, vault trail). This skill only decides *which* items get drafted.
+
+   **Skip list** (do not invoke `/follow-up-draft` for these):
    - Items classified as `Delegated / FYI` (care team, ops auto-alerts)
    - Observer-only threads
    - Automated notifications (Asana digests, Dependabot, commercial mailing lists)
 
-   For each actionable item:
-   1. **Resolve account + thread.** Use the `google_*` MCP that surfaced the message (from step 2), or the `slack_*` workspace (from step 3).
-   2. **Gather context.** Read the full thread via `google_gmail_read_email` on the matching `google_*` MCP (using the message ID from step 2). Check `+ Atlas/People/` for the sender's person note — pull open commitments, recent interactions, and relationship context. For Slack, read the thread via `slack_<slug>_conversations_replies`.
-   3. **Compose draft.** Apply the writing-style profile in CLAUDE.md §6 (general voice, em-dash rule, email vs Slack, audience-size split). For email: use `Re: <original subject>`. For Slack: no subject. All other formatting and tone choices come from §6. (To populate or refresh §6 from your real sent messages, run `/learn-writing-style`.)
-   4. **Save draft.**
-      - **Email:** `google_gmail_draft_email` on the matching `google_*` MCP with `threadId` + `inReplyTo` set so it appears as an in-thread reply.
-      - **Slack:** `mcp__claude_ai_Slack__slack_send_message_draft` with `channel_id` + `thread_ts` if replying in-thread. (This is the one approved use of the deprecated connector — see CLAUDE.md §9.)
-   5. **Log vault trail.** If the sender resolved to a person note, append a bullet under its `## Threads` section: `- <date> · drafted follow-up (<channel>:<draft-id>) — <one-line gist>`. Do NOT update `last_contact` — a draft is not a touchpoint.
+   **For each remaining actionable item:**
+   1. Build the `/follow-up-draft` input: pass the gmail thread id (for email) or slack permalink (for Slack) as `$1`, and a one-line intent hint as `$2` derived from the thread.
+   2. Invoke `/follow-up-draft`. It will resolve the account, pull person context, apply the §6 writing style, save the draft via the matching `gmail_draft_email` or `slack_drafts_create` tool, and log the vault trail under the person's `## Threads` section.
+   3. Collect the returned draft id and account into this skill's "Drafted replies" output section (step 7).
 
-   **Parallelization:** fan out all `google_gmail_read_email` / thread-read calls in one tool-use block, then fan out all `google_gmail_draft_email` / `slack_send_message_draft` calls in the next block.
+   **Parallelization:** `/follow-up-draft` invocations across distinct threads are independent. Fan out all invocations in a single tool-use block.
 
 7. **Compose the daily note.** If `+ Atlas/Daily/<date>.md` does not exist, scaffold from `+ Extras/Templates/Daily.md`. If a `## Morning brief` section already exists in the note, **replace its body in place** (find the `## Morning brief` heading and overwrite everything up to the next H2 or EOF). Otherwise insert a new `## Morning brief` section near the top. Contents:
    - **Today's calendar** (merged timeline, grouped bullet list, `[HH:MM–HH:MM] Title · account-slug · other attendees if any`)

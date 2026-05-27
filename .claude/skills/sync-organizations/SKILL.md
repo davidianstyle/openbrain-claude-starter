@@ -20,7 +20,7 @@ Scan recent activity across all multi-account MCPs and Fathom, propose new Organ
    - **Gmail** — for each `google_*` MCP, `google_gmail_search_emails` with `newer_than:<window>` scoped to inbox + sent. Extract the **domain** of every `From`, `To`, `Cc` address.
    - **Google Calendar** — for each `google_*` MCP, `google_calendar_list_events` over the window. Extract attendee email domains *and* event `location` strings.
    - **Slack** — for each `slack_*` MCP: domain signal is weak from Slack (people identified by handle, not email). Capture only the workspace itself as an implicit Org touchpoint (e.g. `acme.slack.com` → Acme). Slack rarely surfaces *new* org candidates; treat as supporting evidence for existing ones.
-   - **Fathom** — `mcp__fathom__list_meetings` over the window. Extract `calendar_invitees` and their email domains. Fathom's `is_external: true` flag is high-signal for outside organizations.
+   - **Fathom** — `mcp__fathom__fathom_list_meetings` over the window. Extract `calendar_invitees` and their email domains. Fathom's `is_external: true` flag is high-signal for outside organizations.
 
 3. **Existing-org inventory.** Build a set of already-known Org identifiers:
    - Read `+ Atlas/Organizations/*.md` — for each, capture `title`, `url`, and any domain implied by `url`.
