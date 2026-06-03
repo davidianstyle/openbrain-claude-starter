@@ -77,25 +77,25 @@ Step 4 ("Overdue tasks") is for the brief itself. For the dashboard's `## Top pr
 
 ## Asana display ordering
 
-Whenever this skill renders a flat list of Asana tasks (in the `Overdue in Asana` section of the brief, the `## Today` must-do block of the dashboard, or the `## Top priorities` lists), **group by repeat frequency** with subheadings and sort least-frequent → most-frequent so high-stakes items bubble to the top.
+Whenever this skill renders a flat list of Asana tasks (in the `Overdue in Asana` section of the brief, the `## Today` must-do block of the dashboard, or the `## Top priorities` lists), **group by `due_on` ascending** (one date heading per day, earliest first), then **within each day sort by recurrence frequency, least-frequent → most-frequent**, so high-stakes one-offs bubble to the top of each day. **Do not render frequency sub-labels** — each day is a single flat list of checkboxes. The frequency ordering is implicit through sort order only.
 
 **Source of truth: the Asana `recurrence.type` field. Never guess from the task name.** Heuristics are unreliable — task titles rarely encode their repeat cadence.
 
 **Required opt_fields.** When this skill issues `asana_get_my_tasks` (step 4) or any task fetch that will feed into a display list, **`recurrence` MUST be in `opt_fields`**. Standard fetches don't return it. The recommended opt_fields string for this skill: `name,due_on,due_at,completed,assignee_section.name,projects.name,permalink_url,recurrence`.
 
-**`recurrence.type` → display group mapping:**
+**`recurrence.type` → sort order within the day:**
 
-| `recurrence.type` | Display group | Order |
-|---|---|---|
-| `never` | **One-off** | 1 (highest priority) |
-| `yearly` | **Annually** | 2 |
-| `monthly` | **Monthly** | 3 |
-| `weekly` | **Weekly** | 4 |
-| `daily` | **Daily** | 5 (collapsed at bottom) |
+| `recurrence.type` | Sort order |
+|---|---|
+| `never` (one-off) | 1 (highest priority, top of day) |
+| `yearly` | 2 |
+| `monthly` | 3 |
+| `weekly` | 4 |
+| `daily` | 5 (bottom of day) |
 
 If `recurrence` is missing from a task response (e.g. an API error or older field set), treat as `never` and flag the task with a `?` so the user can verify.
 
-Within each group, secondary sort by `due_on` ascending. Omit empty groups. Render group labels as bold inline labels (`**One-off**`, `**Annually**`, etc.) — do NOT use H3 since these live inside an H2 section. This grouping is the **default** behavior when no explicit alternative sort is in effect.
+**Layout.** Render each day as a bold date heading (e.g. `**📅 Mon 6/01 (today)**`), followed by a flat checkbox list of that day's tasks in the sort order above. **No sub-labels, no nested bullets** — sub-labels eat too much vertical space. Collapse same-frequency siblings onto one line with `·` separators when that keeps the list scannable (e.g. the three monthly resets on Mon 6/01). Daily-recurring tasks should be collapsed to a single bullet prefixed with `_Daily (N open):_` so the daily checklist doesn't dominate the day's view. Omit empty days. This grouping is the **default** behavior when no explicit alternative sort is in effect. _Why this ordering, not pure frequency-first: due-date primary lets the user scan a day-by-day plan; frequency-secondary within each day still floats the high-stakes one-offs above the recurring chore bundle. Pure frequency-first scattered today's items across 4 sections, which broke the daily-plan scan. And explicit frequency sub-labels add too much vertical chrome — the sort order alone communicates the priority._
 
 ## Notes
 
