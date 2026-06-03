@@ -47,16 +47,7 @@ fi
 # Step 1: prereqs (auto-installs missing dependencies)
 # -----------------------------------------------------------------------------
 step "1/9 · Checking & installing prerequisites"
-ensure_git
-ok "git: $(command -v git)"
-ensure_python3
-ok "python3: $PYTHON_BIN"
-ensure_node
-ok "node: $(command -v node) ($(node --version))"
-ensure_claude_cli
-ok "claude: $(command -v claude)"
-ensure_gh
-ok "gh: $(command -v gh)"
+ensure_prereqs
 
 # If asdf is active, ensure .tool-versions exists so node/python resolve in this dir
 if command -v asdf >/dev/null 2>&1 && [[ ! -f "$REPO_ROOT/.tool-versions" ]]; then
