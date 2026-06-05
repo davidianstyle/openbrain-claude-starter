@@ -204,7 +204,9 @@ ensure_prereqs() {
   ensure_claude_cli
   ok "claude: $(command -v claude)"
   ensure_gh
-  ok "gh: $(command -v gh)"
+  # gh is optional (ensure_gh warns rather than dies); show "not installed"
+  # instead of a blank path when it's absent.
+  ok "gh: $(command -v gh || echo 'not installed')"
 }
 
 ensure_venv() {
