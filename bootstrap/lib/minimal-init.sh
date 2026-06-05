@@ -32,11 +32,16 @@ chmod 700 "$CONFIG_DIR" "$TOKEN_DIR"
 chmod 755 "$LIB_DIR"
 chmod 600 "$ENV_FILE"
 
-for f in "$REPO_ROOT/.openbrain/lib/"*.sh; do
-  [[ -e "$f" ]] || continue  # no launchers present → glob stays literal under set -e; skip
+src_lib="$REPO_ROOT/.openbrain/lib"
+[[ -d "$src_lib" ]] || die "launcher source dir not found: $src_lib (broken checkout?)"
+copied=0
+for f in "$src_lib/"*.sh; do
+  [[ -e "$f" ]] || continue  # glob stayed literal → no .sh present; fail loudly below
   dest="$LIB_DIR/$(basename "$f")"
   cp "$f" "$dest"
   chmod 755 "$dest"
+  copied=$((copied + 1))
 done
+(( copied > 0 )) || die "no launcher scripts in $src_lib — refusing a partial install"
 
 ok "minimal init complete: $CONFIG_DIR"
