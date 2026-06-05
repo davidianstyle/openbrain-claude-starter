@@ -33,6 +33,7 @@ chmod 755 "$LIB_DIR"
 chmod 600 "$ENV_FILE"
 
 for f in "$REPO_ROOT/.openbrain/lib/"*.sh; do
+  [[ -e "$f" ]] || continue  # no launchers present → glob stays literal under set -e; skip
   dest="$LIB_DIR/$(basename "$f")"
   cp "$f" "$dest"
   chmod 755 "$dest"
