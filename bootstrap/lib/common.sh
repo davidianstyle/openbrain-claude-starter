@@ -206,7 +206,11 @@ ensure_prereqs() {
   ensure_gh
   # gh is optional (ensure_gh warns rather than dies); show "not installed"
   # instead of a blank path when it's absent.
-  ok "gh: $(command -v gh || echo 'not installed')"
+  if command -v gh >/dev/null 2>&1; then
+    ok "gh: $(command -v gh)"
+  else
+    ok "gh: not installed"
+  fi
 }
 
 ensure_venv() {
