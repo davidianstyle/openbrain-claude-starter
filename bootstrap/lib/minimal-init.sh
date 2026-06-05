@@ -38,6 +38,7 @@ copied=0
 for f in "$src_lib/"*.sh; do
   [[ -e "$f" ]] || continue  # glob stayed literal → no .sh present; fail loudly below
   dest="$LIB_DIR/$(basename "$f")"
+  rm -f "$dest"          # replace a stale file or dev symlink, don't write through it
   cp "$f" "$dest"
   chmod 755 "$dest"
   copied=$((copied + 1))
