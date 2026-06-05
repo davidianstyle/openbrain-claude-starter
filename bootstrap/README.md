@@ -23,9 +23,24 @@ What each step does:
 | 7 | Git pre-commit hook | symlinks `.git/hooks/pre-commit` → `.openbrain/pre-commit.sh` |
 | 8 | Validate | runs `validate.sh` (non-blocking) |
 
+## Architecture: what's brain-specific vs. shared
+
+`setup.sh` builds two layers, and that split is why `minimal-init.sh` exists:
+
+- **Shared MCP-integration layer** (`~/.config/openbrain/`) — `.env` (secrets), `tokens/` (per-account OAuth), `lib/` (launchers + `_common.sh`), `venv/`. This is *not* brain-specific: it's the provider-agnostic plumbing any consumer of the `davidianstyle/*-mcp` servers needs. `bootstrap/lib/minimal-init.sh` stands up *just* this layer.
+- **The brain** — the Obsidian vault, `CLAUDE.md`, `Home.md`, skills, git hooks: everything else `setup.sh` layers on top.
+
+Because the shared layer is factored into `minimal-init.sh`, a separate tool that wants the MCPs *without* the vault can shallow-clone this repo, run `minimal-init.sh`, vendor the `add-*.sh` scripts it needs, and stop.
+
+A third boundary sits below both: the **MCP servers** (`davidianstyle/google-mcp`, `asana-mcp`, …) are separate repos. The launchers in `~/.config/openbrain/lib/` clone them to `~/<name>`, build them on demand (`ensure_mcp_server`), and `exec` them. The shared layer holds credentials + launchers; the servers live in their own repos.
+
 ## Lifecycle scripts
 
 All live in `bootstrap/lib/`. Safe to run directly any time.
+
+### `minimal-init.sh`
+
+Stands up the shared MCP-integration layer (the `~/.config/openbrain/` dirs, `.env` from the template, launcher scripts) — no vault. Called by `setup.sh` step 4, and directly by external consumers that want the MCP plumbing without the brain. Idempotent.
 
 ### `setup-google-oauth.sh`
 

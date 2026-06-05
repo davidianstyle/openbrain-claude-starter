@@ -9,7 +9,7 @@
 # Called by:
 #   - OpenBrain's own setup.sh (step 4 of the wizard, in place of the
 #     inlined logic that previously lived there)
-#   - External consumers (e.g., doro-events/bootstrap/setup.sh) that
+#   - External consumers (e.g. a separate project's bootstrap) that
 #     need the MCP-installer machinery without the rest of the vault
 #     experience. Those consumers shallow-clone this repo to /tmp, run
 #     this script, vendor the per-service `add-*.sh` scripts they need,

@@ -132,8 +132,8 @@ fi
 # Step 4: install config dir + env
 # -----------------------------------------------------------------------------
 # The shared-layer dir setup + launcher install lives in lib/minimal-init.sh
-# so external consumers (e.g. doro-events) can re-use it without inheriting
-# the rest of this wizard. Inlined logic was equivalent; see commit history.
+# so external consumers can re-use it without inheriting the rest of this
+# wizard. Inlined logic was equivalent; see commit history.
 step "4/9 · Installing ~/.config/openbrain/"
 "$HERE/lib/minimal-init.sh"
 

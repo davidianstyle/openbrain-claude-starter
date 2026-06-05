@@ -188,7 +188,7 @@ ensure_gh() {
 # Canonical install-time prerequisite set. The single source of truth for
 # "what must be present before any MCP can build or run." setup.sh calls this
 # instead of listing the ensures inline, and external consumers (e.g. a
-# doro-events bootstrap that vendors this file) call the same function — so a
+# separate project bootstrap that vendors this file) call the same function — so a
 # new prerequisite added here propagates to every consumer without each one
 # re-implementing the list. Emits the same ok-lines setup.sh used to print.
 # Note: repo-specific steps (e.g. writing .tool-versions into $REPO_ROOT) stay
