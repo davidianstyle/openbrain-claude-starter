@@ -48,9 +48,14 @@ trap 'rm -rf "$TMPROOT"' EXIT
 # 1. Parse check — every shell script must parse under bash.
 # ---------------------------------------------------------------------------
 sect "parse (bash -n)"
+checked=0
 while IFS= read -r f; do
+  checked=$((checked + 1))
   if bash -n "$f" 2>/dev/null; then pass "${f#"$REPO_ROOT"/}"; else fail "${f#"$REPO_ROOT"/} (syntax)"; fi
 done < <(find "$REPO_ROOT/bootstrap" "$REPO_ROOT/.openbrain" -type f -name '*.sh' 2>/dev/null | sort)
+# A CI gate that checked nothing must not pass — guard against a wrong cwd /
+# renamed dirs producing an empty file set.
+(( checked > 0 )) || fail "no shell scripts found under bootstrap/ or .openbrain/ (wrong cwd?)"
 
 # ---------------------------------------------------------------------------
 # 2. minimal-init.sh stands up the shared layer in a sandbox $HOME.
@@ -64,12 +69,16 @@ if [[ -f "$LIBDIR/minimal-init.sh" ]]; then
     cfg="$SBX/.config/openbrain"
     if [[ -f "$cfg/.env" ]]; then pass ".env created from template"; else fail ".env not created"; fi
     if ls "$cfg/lib/"*.sh >/dev/null 2>&1; then pass "launcher scripts installed"; else fail "no launcher scripts copied"; fi
-    # Idempotency: a marker added to .env must survive a re-run.
-    printf 'SMOKE_SENTINEL=1\n' >> "$cfg/.env"
-    if HOME="$SBX" bash "$LIBDIR/minimal-init.sh" >/dev/null 2>&1 && grep -q SMOKE_SENTINEL "$cfg/.env"; then
-      pass "idempotent (.env preserved on re-run)"
-    else
-      fail ".env clobbered on re-run"
+    # Idempotency: a marker added to .env must survive a re-run. Only meaningful
+    # if the first run actually produced .env — otherwise the append would create
+    # it and the re-run could pass spuriously.
+    if [[ -f "$cfg/.env" ]]; then
+      printf 'SMOKE_SENTINEL=1\n' >> "$cfg/.env"
+      if HOME="$SBX" bash "$LIBDIR/minimal-init.sh" >/dev/null 2>&1 && grep -q SMOKE_SENTINEL "$cfg/.env"; then
+        pass "idempotent (.env preserved on re-run)"
+      else
+        fail ".env clobbered on re-run"
+      fi
     fi
   else
     fail "minimal-init.sh exited non-zero"
@@ -82,7 +91,7 @@ fi
 # 3. _oauth_env indirect-expansion helper, exercised under set -u.
 # ---------------------------------------------------------------------------
 sect "_oauth_env helper (set -u)"
-if grep -q '_oauth_env()' "$LIBDIR/common.sh" 2>/dev/null; then
+if grep -qE '_oauth_env[[:space:]]*\(\)' "$LIBDIR/common.sh" 2>/dev/null; then
   # Source common.sh WITHOUT set -e (avoid any source-time abort), then enable
   # the nounset guard that is the whole point of the test, then probe both a set
   # and an unset provider var. Expect "abc|" (value, then empty — no crash).
