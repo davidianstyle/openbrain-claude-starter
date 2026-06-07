@@ -40,7 +40,8 @@ sect() { printf '\n== %s ==\n' "$*"; }
 
 # One temp root for every sandboxed tier; a single EXIT trap removes it, so the
 # script never leaks a directory regardless of which tiers run or how it exits.
-TMPROOT="$(mktemp -d)"
+TMPROOT="$(mktemp -d)" || { printf 'could not create temp dir\n' >&2; exit 1; }
+[[ -n "$TMPROOT" && -d "$TMPROOT" ]] || { printf 'mktemp gave no dir\n' >&2; exit 1; }
 trap 'rm -rf "$TMPROOT"' EXIT
 
 # ---------------------------------------------------------------------------
@@ -55,12 +56,14 @@ done < <(find "$REPO_ROOT/bootstrap" "$REPO_ROOT/.openbrain" -type f -name '*.sh
 # 2. minimal-init.sh stands up the shared layer in a sandbox $HOME.
 # ---------------------------------------------------------------------------
 sect "minimal-init.sh (sandbox HOME)"
-if [[ -x "$LIBDIR/minimal-init.sh" ]]; then
+# -f, not -x: we invoke it via `bash <file>`, so the exec bit is irrelevant and
+# checking it would wrongly skip the tier if a checkout/CI dropped the mode.
+if [[ -f "$LIBDIR/minimal-init.sh" ]]; then
   SBX="$TMPROOT/init"; mkdir -p "$SBX"
   if HOME="$SBX" bash "$LIBDIR/minimal-init.sh" >/dev/null 2>&1; then
     cfg="$SBX/.config/openbrain"
-    [[ -f "$cfg/.env" ]] && pass ".env created from template" || fail ".env not created"
-    if compgen -G "$cfg/lib/*.sh" >/dev/null; then pass "launcher scripts installed"; else fail "no launcher scripts copied"; fi
+    if [[ -f "$cfg/.env" ]]; then pass ".env created from template"; else fail ".env not created"; fi
+    if ls "$cfg/lib/"*.sh >/dev/null 2>&1; then pass "launcher scripts installed"; else fail "no launcher scripts copied"; fi
     # Idempotency: a marker added to .env must survive a re-run.
     printf 'SMOKE_SENTINEL=1\n' >> "$cfg/.env"
     if HOME="$SBX" bash "$LIBDIR/minimal-init.sh" >/dev/null 2>&1 && grep -q SMOKE_SENTINEL "$cfg/.env"; then
