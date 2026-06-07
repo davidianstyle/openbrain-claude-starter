@@ -84,6 +84,16 @@ Non-blocking sanity check. Verifies:
 
 Prints a summary with ✓ / ⚠ / ✗. Exits 0 unless a hard error is present.
 
+### `smoke-test.sh`
+
+Pre-install counterpart to `validate.sh`. Where `validate.sh` checks whether *this machine's install* is healthy (real `~/.config/openbrain` + `~/.claude.json` state, after `setup.sh`), `smoke-test.sh` checks whether the *code in this checkout* is sound — with nothing installed and without touching your real `$HOME`. Three tiers:
+
+1. every shell script under `bootstrap/` and `.openbrain/` parses (`bash -n`)
+2. `minimal-init.sh` stands up the shared layer in a throwaway `$HOME` — dirs + `.env` + launchers, idempotent on re-run
+3. the `_oauth_env` indirect-expansion helper behaves under `set -u` (set → value, unset → empty, no crash)
+
+Tiers 2–3 self-skip when the feature isn't in the tree yet, so it's safe to run at any point. Exits non-zero on the first hard failure — suitable as a CI gate. A green run in both the `claude-starter` and `gemini-starter` editions is executable proof the shared `bootstrap/lib` layer hasn't drifted.
+
 ---
 
 ## Removing an account
