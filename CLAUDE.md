@@ -273,6 +273,84 @@ Skills are markdown procedures only — they describe which MCP tools to call an
 
 - When deploying scripts or config files, always verify the target runtime path (e.g., `~/.config/openbrain/`) matches where you expect to run them from, not just the repo directory. The repo contains templates and tracked copies (`.openbrain/`); the live runtime copies live under `~/.config/openbrain/` (mode 755 for scripts, mode 600 for secrets).
 
+## 16. Session loop (output declaration and closeout)
+
+Every free-form interactive session follows an open → work → close loop. The loop forces explicit agreement on what the session is producing before tool calls fire, and gives the closeout a concrete target to verify against.
+
+**Scope.** Applies to interactive sessions where the user describes work in their own words. Does NOT apply to: explicit skill invocations (`/daily-brief`, `/process-inbox`, etc. — each skill's SKILL.md is its own scope contract), scheduled/nightly runs, and truly conversational exchanges (quick lookups, "what's on my calendar"). If you find yourself wanting to skip the declaration frequently in genuinely substantive sessions, surface that as conversation.
+
+### Opening a session
+
+1. **Read what's relevant.** Project MOCs in `+ Spaces/`, person notes per §12's read triggers, the relevant SKILL.md for build work. Don't read what's not relevant.
+2. **Run a viability check** when the work depends on MCP tools or system behavior not yet verified this session (e.g., a Google account's OAuth state, a Slack DM channel id). Make a small probe call; name any gaps before going further.
+3. **Declare the intended Output**, then build. Get explicit approval before larger or destructive changes.
+
+### Output declaration
+
+Format: `Output: <category> — <specific mechanism>`. One line per primary output; stack lines for multi-output sessions.
+
+Four outcome categories; the mechanism field carries any sub-distinction:
+
+1. **Decision made** — lock a call, with an execution plan when non-trivial. Absorbs "plan established."
+2. **Communication drafted** — outbound email or Slack message saved as a draft per §6/§14 (never sent; the user sends). Mechanism names the account/workspace, e.g. `Gmail draft to Jane via jane-acme-com`.
+3. **Artifact produced** — standalone deliverable: code, script, skill, Google Doc/Sheet/Slides, file output destined for use outside the vault.
+4. **Vault maintenance** — internal upkeep: vault writes (MOC, person, interaction, atomic notes), Asana writes per §5, audits/syncs/analyses of internal state.
+
+**Primary vs. byproduct.** Declared Outputs name the session's primary intent. Maintenance that fires automatically under existing conventions is byproduct and is never declared — it surfaces in the closeout footer instead. The test: if it would happen anyway because conventions require it, it's byproduct; if the user explicitly asked for it, it's a declared Output. Byproducts in this vault include: the §12 interaction-linking contract (`last_contact` + Threads updates), `asana_gid` write-backs (§5), people-candidate staging, and — when the opt-in git-sync hooks are enabled (§10) — the Stop hook's Home.md regen + auto-commit.
+
+**Timing.** Declare after the orientation read so the declaration is informed. If the intended output is genuinely ambiguous, ask ("what exactly are we trying to do right now?") rather than guess. If the session shifts mid-stream, add a one-line `Output revised:` callout; don't restate for minor refinements.
+
+**Scope drift.** When something important but outside the declared Outputs surfaces (overdue task, related issue, pattern worth flagging), raise it as a `Scope flag: [thing noticed]. Tack on as new Output, or set aside?` line. Don't act on it inline; don't bury it in prose. High bar for flagging.
+
+### Closing a session
+
+When the session wraps (the user signals done, or ~2 exchanges pass after the last substantive deliverable with no new work), scan what was touched and verify updates landed. Apply anything missed per the autonomous-edit scope below. Then append a two-line status footer:
+
+```
+Status — primary outputs: closing clean. Byproducts: closing clean.
+Status — primary outputs: in flight (pending: X). Byproducts: in flight (pending: Y).
+```
+
+- **Primary outputs**: closing clean iff every declared Output shipped.
+- **Byproducts**: closing clean iff every expected automatic update (§12 linking contract, §5 sync write-backs, etc.) fired.
+
+Each layer's "closing clean" requires an actual verification scan against what was discussed vs. what was applied. If unsure, default to "in flight" and name what is uncertain. A false "closing clean" is worse than ambiguity, because the user will trust it. Don't append the footer on every message or early in a session. If nothing durable came out (quick lookup), say so and close cleanly without ceremony.
+
+### Autonomous edit scope
+
+Consolidates the act-vs-propose rules scattered through §4/§5/§9/§12. When in doubt between the two lists, lean autonomous-and-notify (cheap to revert via git) over ask-first (costs the user's bandwidth) — unless §9 says never.
+
+**Autonomous (act, notify in footer):**
+- Interaction notes in `+ Atlas/Interactions/` — create and edit per the §12 linking contract.
+- Person note `last_contact` + `## Threads` + `## Open commitments` updates per §12.
+- `asana_gid`/`asana_workspace` frontmatter write-backs after Asana sync (§5).
+- Asana create/update for `#asana/*`-tagged notes during scheduled triage (§5 — explicit opt-in).
+- Daily note section refreshes (`## Morning brief`, `## Evening review`) per their skills.
+- Candidate staging in `+ Inbox/people-candidates/`, `org-candidates/`, `place-candidates/`.
+- Correction propagation to source notes per §17.
+
+**Propose first (wait for explicit go-ahead):**
+- CLAUDE.md and SKILL.md edits — behavioral code, touches every session.
+- Template changes in `+ Extras/Templates/` — require a migration plan per §8.
+- Moving/renaming notes in interactive sessions (§4), multi-note refactors, archive actions (§9).
+- Promoting candidates into `+ Atlas/People/` (manual step per §12).
+- Asana writes for untagged notes or bulk operations >5 tasks (§5).
+- Anything outward-facing beyond saved drafts (sending is never autonomous).
+
+The §9 never-list overrides both lists.
+
+## 17. Correction propagation
+
+When the user corrects a fact or interpretation Claude stated (distinct from disagreeing with a new proposal or draft — that's just working together), trace the error back to its source and fix it there, not just absorb the correction in chat. Otherwise the same wrong belief re-fires next time the source is read.
+
+1. **Trace the source.** Vault note (person, MOC, interaction, atomic), CLAUDE.md, a memory file, inference from chat context, or fabrication. If untraceable, say so.
+2. **Diagnose.** Source says X and X is wrong → fix X. Source says X and Claude extrapolated to Y → tighten the wording or add a "not Y" disambiguation. Fabricated → nothing to fix; don't repeat.
+3. **Branch on certainty.** Obvious → apply directly (autonomous per §16). Ambiguous (multiple places it could land, or the correction contradicts other entries) → ask one clarifying question, then apply.
+4. **Always surface the trace in the response**, even on obvious fixes: "Traced to <note>; updated <section> to reflect <change>." Autonomous propagation without visibility is how silent corruption happens.
+5. **Default assumption:** any correction implies a stored-data fix until proven otherwise. Never shrug off a correction as "noted."
+
+When making substantive factual claims about people, projects, or stored context, cite the source note inline when natural so the trace is already on the table if the user pushes back.
+
 ---
 
 **Generated by the [openbrain-claude-starter](https://github.com/davidianstyle/openbrain-claude-starter) bootstrap on `{{BOOTSTRAP_DATE}}`.** Re-run `bootstrap/setup.sh` to update this file after adding new services.

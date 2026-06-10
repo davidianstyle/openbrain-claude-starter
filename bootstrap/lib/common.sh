@@ -101,33 +101,37 @@ ensure_git() {
 }
 
 ensure_python3() {
-  # Prefer Homebrew, then system. Every candidate must pass --version to
-  # catch asdf/nvm shims that exist as executables but error at runtime.
+  # Prefer Homebrew, then system. Every candidate must be able to load
+  # pyexpat — not just pass --version. This catches both asdf/nvm shims that
+  # exist as executables but error at runtime, AND interpreters whose
+  # `python3 -m venv` would silently create a venv with a crashing
+  # `ensurepip` (seen on macOS 26.1 with Homebrew python@3.14 bottles built
+  # against a newer libexpat).
   for candidate in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
-    if [[ -x "$candidate" ]] && "$candidate" --version >/dev/null 2>&1; then
+    if [[ -x "$candidate" ]] && "$candidate" -c "import pyexpat" >/dev/null 2>&1; then
       PYTHON_BIN="$candidate"
       return 0
     fi
   done
-  # Try whatever is on PATH, but verify it actually runs
+  # Try whatever is on PATH, but verify it actually works
   PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
-  if [[ -n "$PYTHON_BIN" && -x "$PYTHON_BIN" ]] && "$PYTHON_BIN" --version >/dev/null 2>&1; then
+  if [[ -n "$PYTHON_BIN" && -x "$PYTHON_BIN" ]] && "$PYTHON_BIN" -c "import pyexpat" >/dev/null 2>&1; then
     return 0
   fi
   # Auto-install via Homebrew
-  info "python3 not found (or asdf shim has no version set) — installing via Homebrew..."
+  info "no working python3 found (missing, broken shim, or pyexpat/libexpat mismatch) — installing via Homebrew..."
   ensure_homebrew
   brew install python
   # Use Homebrew's python directly to avoid asdf shim interference
   for candidate in /opt/homebrew/bin/python3 /usr/local/bin/python3; do
-    if [[ -x "$candidate" ]]; then
+    if [[ -x "$candidate" ]] && "$candidate" -c "import pyexpat" >/dev/null 2>&1; then
       PYTHON_BIN="$candidate"
       return 0
     fi
   done
   PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
-  [[ -n "$PYTHON_BIN" && -x "$PYTHON_BIN" ]] \
-    || die "python3 installation failed"
+  [[ -n "$PYTHON_BIN" && -x "$PYTHON_BIN" ]] && "$PYTHON_BIN" -c "import pyexpat" >/dev/null 2>&1 \
+    || die "python3 installation failed — every candidate failed to load pyexpat (likely a Homebrew/libexpat mismatch; try 'brew reinstall --build-from-source python')"
   ok "python3 installed"
 }
 
@@ -211,6 +215,53 @@ ensure_prereqs() {
   else
     ok "gh: not installed"
   fi
+}
+
+# ---------- MCP server source repos ----------
+# Each MCP server is a TypeScript project in its own GitHub repo, cloned to
+# $HOME/Code/<name>-mcp and built to dist/index.js. The launcher scripts in
+# .openbrain/lib/*.sh exec that built artifact. Override the GitHub owner with
+# OPENBRAIN_MCP_REPO_OWNER (e.g. if you've forked the servers).
+MCP_REPO_OWNER="${OPENBRAIN_MCP_REPO_OWNER:-davidianstyle}"
+MCP_SRC_ROOT="$HOME/Code"
+
+ensure_mcp_server() {
+  # ensure_mcp_server <name>   (e.g. "asana", "google", "slack", "fathom")
+  # Clones $MCP_REPO_OWNER/<name>-mcp into $MCP_SRC_ROOT if missing, then runs
+  # npm install + npm run build. Idempotent — re-runs the build only when
+  # dist/index.js is missing.
+  local name="$1"
+  local repo="${MCP_REPO_OWNER}/${name}-mcp"
+  local src_dir="$MCP_SRC_ROOT/${name}-mcp"
+  local dist="$src_dir/dist/index.js"
+
+  if [[ -f "$dist" ]]; then
+    ok "${name}-mcp already built ($src_dir)"
+    return 0
+  fi
+
+  ensure_node
+
+  if [[ ! -d "$src_dir" ]]; then
+    mkdir -p "$MCP_SRC_ROOT"
+    info "cloning $repo → $src_dir"
+    if command -v gh >/dev/null 2>&1; then
+      gh repo clone "$repo" "$src_dir" >/dev/null \
+        || die "failed to clone $repo via gh — confirm access (gh auth status) or set OPENBRAIN_MCP_REPO_OWNER"
+    else
+      git clone "https://github.com/${repo}.git" "$src_dir" \
+        || die "failed to clone https://github.com/${repo}.git — install gh (brew install gh) for private-repo auth"
+    fi
+  fi
+
+  info "installing ${name}-mcp dependencies (npm install in $src_dir)"
+  ( cd "$src_dir" && npm install ) || die "npm install failed in $src_dir"
+
+  info "building ${name}-mcp (npm run build)"
+  ( cd "$src_dir" && npm run build ) || die "npm run build failed in $src_dir"
+
+  [[ -f "$dist" ]] || die "build completed but $dist still missing — investigate $src_dir"
+  ok "${name}-mcp built ($dist)"
 }
 
 ensure_venv() {

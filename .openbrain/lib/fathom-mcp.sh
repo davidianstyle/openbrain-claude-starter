@@ -4,10 +4,10 @@ set -euo pipefail
 # shellcheck source=_common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
-SERVER="$HOME/fathom-mcp/dist/index.js"
+SERVER="$HOME/Code/fathom-mcp/dist/index.js"
 
 require_env FATHOM_API_KEY
 export FATHOM_API_KEY
-ensure_mcp_server "fathom-mcp"
+ensure_mcp_server fathom-mcp
 
 exec node "$SERVER"

@@ -88,6 +88,30 @@ info "Slack workspaces with tokens: $SCOUNT"
 [[ -n "${ASANA_PAT_WORK:-}" ]]     && ok "Asana work token set"     || info "no Asana work token (optional)"
 [[ -n "${FATHOM_API_KEY:-}" ]]     && ok "Fathom API key set"       || info "no Fathom API key (optional)"
 
+step "MCP server source repos"
+check_mcp_built() {
+  # check_mcp_built <name> <add-script>
+  local name="$1" add_script="$2"
+  local dist="$MCP_SRC_ROOT/${name}-mcp/dist/index.js"
+  if [[ -f "$dist" ]]; then
+    ok "${name}-mcp built ($dist)"
+  else
+    check_warn "${name}-mcp not built at $dist — re-run $add_script"
+  fi
+}
+[[ -n "${ASANA_PAT_PERSONAL:-}${ASANA_PAT_WORK:-}" ]] \
+  && check_mcp_built asana "./bootstrap/lib/add-asana.sh personal|work" \
+  || info "asana-mcp not needed (no Asana tokens configured)"
+(( GCOUNT > 0 )) \
+  && check_mcp_built google "./bootstrap/lib/add-google-account.sh <email>" \
+  || info "google-mcp not needed (no Google accounts configured)"
+(( SCOUNT > 0 )) \
+  && check_mcp_built slack "./bootstrap/lib/add-slack-workspace.sh <subdomain>" \
+  || info "slack-mcp not needed (no Slack workspaces configured)"
+[[ -n "${FATHOM_API_KEY:-}" ]] \
+  && check_mcp_built fathom "./bootstrap/lib/add-fathom.sh" \
+  || info "fathom-mcp not needed (no Fathom key configured)"
+
 step "Claude MCP registration"
 CLAUDE_JSON="$HOME/.claude.json"
 if [[ -f "$CLAUDE_JSON" ]]; then
