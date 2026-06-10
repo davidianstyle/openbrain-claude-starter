@@ -1,7 +1,7 @@
 # template-ignore — known intentional divergences from the template (keepers).
 #
-# Paths listed here are skipped by /push-openbrain-template and
-# /pull-openbrain-template during drift inventory: they never surface as
+# Paths listed here are skipped by /push-openbrain-claude-starter and
+# /pull-openbrain-claude-starter during drift inventory: they never surface as
 # candidates, so recurring known drift costs zero review tokens. Both skills
 # report a one-line count of ignored paths per run, so nothing is silently
 # hidden.
