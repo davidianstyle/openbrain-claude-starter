@@ -32,6 +32,7 @@ Scan recent activity across all multi-account MCPs and Fathom, propose new Organ
 5. **Filter noise.** Drop:
    - **Consumer email providers** (these are people, not orgs): `gmail.com`, `googlemail.com`, `yahoo.com`, `outlook.com`, `hotmail.com`, `live.com`, `aol.com`, `msn.com`, `icloud.com`, `me.com`, `mac.com`, `comcast.net`, `sbcglobal.net`, `verizon.net`, `att.net`, `cox.net`, `bellsouth.net`, `earthlink.net`, `optimum.net`.
    - **No-reply / system domains**: anything that only appears under sender addresses like `noreply@`, `notifications@`, `mailer-daemon@`, `donotreply@`, `connect@`, `email@`, `news@`, `info@` *and* never on a To/From that's bidirectional with the user. Marketing-only domains belong to the Delegated/FYI bucket, not Organizations.
+   - **Individual clients/prospects writing to a delegated shared mailbox** — domains that surfaced only from traffic to a shared alias the user's team handles (e.g. `support@` / `care@`-style mailboxes) where the external party is a single individual writing from a consumer or vanity domain. These are individual clients or prospects, not organizational partners.
    - **The user's own configured Google account domains** (already known org identifiers; treat them as Bucket A signals, not noise).
 
 6. **Classify each domain into one of three buckets.**
