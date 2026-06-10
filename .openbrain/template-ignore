@@ -1,0 +1,22 @@
+# template-ignore — known intentional divergences from the template (keepers).
+#
+# Paths listed here are skipped by /push-openbrain-template and
+# /pull-openbrain-template during drift inventory: they never surface as
+# candidates, so recurring known drift costs zero review tokens. Both skills
+# report a one-line count of ignored paths per run, so nothing is silently
+# hidden.
+#
+# Format: one path or glob per line, relative to the vault root.
+#   .claude/skills/daily-brief/SKILL.md      (exact file)
+#   .obsidian/*                              (glob)
+# Blank lines and lines starting with # are ignored.
+#
+# Do NOT list upstream-PR candidates here (e.g. a hook script while its PR
+# against the template is pending) — those must keep surfacing in inventory
+# until merged. CLAUDE.md also stays out: both skills already handle it
+# hunk-by-hunk, and a whole-file ignore would hide template-relevant edits.
+#
+# This file itself is the seed entry: each vault maintains its own keeper
+# list, which is itself an intentional divergence from the template.
+
+.openbrain/template-ignore
