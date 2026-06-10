@@ -51,13 +51,14 @@ If the template directory exists, sync it; otherwise clone it. **Branch-aware:**
 
 ```bash
 if [ -d "$TEMPLATE/.git" ]; then
-  cd "$TEMPLATE"
-  BRANCH="$(git branch --show-current)"
-  if [ -z "$BRANCH" ] || [ "$BRANCH" = "main" ]; then
-    git checkout main && git pull --rebase --autostash
-  else
-    echo "template clone is on '$BRANCH' — diffing that tree as-is (no checkout/pull)"
-  fi
+  cd "$TEMPLATE" && {
+    BRANCH="$(git branch --show-current)"
+    if [ -z "$BRANCH" ] || [ "$BRANCH" = "main" ]; then
+      git checkout main && git pull --rebase --autostash
+    else
+      echo "template clone is on '$BRANCH' — diffing that tree as-is (no checkout/pull)"
+    fi
+  }
 else
   git clone git@github.com:davidianstyle/openbrain-claude-starter.git "$TEMPLATE"
 fi
@@ -86,7 +87,7 @@ Filter to in-scope paths. Drop anything matching out-of-scope rules.
 
 > `template-ignore: N path(s) skipped (path1, path2, …)`
 
-with N=0 and no list when nothing matched. If a manifest entry matched no candidate at all, note it as stale — the divergence it covered may have disappeared.
+with N=0 and no list when nothing matched. If a specific path entry (not a glob) matched no candidate and that file no longer exists in either the vault or the template, note it as stale — the divergence it covered is gone. Glob entries and currently-identical files are not stale; they are dormant and stay silent.
 
 ### 3. Per-file analysis
 

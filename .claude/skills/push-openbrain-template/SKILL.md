@@ -75,7 +75,7 @@ Filter the list to in-scope paths per the table above. Drop anything that matche
 
 > `template-ignore: N path(s) skipped (path1, path2, …)`
 
-with N=0 and no list when nothing matched. If a manifest entry matched no candidate at all, note it as stale — the divergence it covered may have disappeared.
+with N=0 and no list when nothing matched. If a specific path entry (not a glob) matched no candidate and that file no longer exists in either the vault or the template, note it as stale — the divergence it covered is gone. Glob entries and currently-identical files are not stale; they are dormant and stay silent.
 
 ### 3. Per-file analysis
 
