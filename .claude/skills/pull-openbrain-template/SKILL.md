@@ -50,7 +50,7 @@ TEMPLATE="${OPENBRAIN_TEMPLATE_DIR:-$HOME/openbrain-claude-starter}"
 If the template directory exists, sync it; otherwise clone it. **Branch-aware:** if the clone is already checked out on a non-`main` branch (e.g. a staging or integration branch prepared for this pull), keep that checkout and skip the pull — the user put it there deliberately. Announce which ref is being diffed and name it again in the final report.
 
 ```bash
-if [ -d "$TEMPLATE/.git" ]; then
+if [ -e "$TEMPLATE/.git" ]; then
   (
     cd "$TEMPLATE" && {
       BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
