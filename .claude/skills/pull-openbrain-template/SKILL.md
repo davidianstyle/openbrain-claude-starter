@@ -52,8 +52,8 @@ If the template directory exists, sync it; otherwise clone it. **Branch-aware:**
 ```bash
 if [ -d "$TEMPLATE/.git" ]; then
   cd "$TEMPLATE" && {
-    BRANCH="$(git branch --show-current)"
-    if [ -z "$BRANCH" ] || [ "$BRANCH" = "main" ]; then
+    BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    if [ "$BRANCH" = "main" ] || [ -z "$BRANCH" ]; then
       git checkout main && git pull --rebase --autostash
     else
       echo "template clone is on '$BRANCH' — diffing that tree as-is (no checkout/pull)"
