@@ -4,8 +4,8 @@
 # Every ref in a vault repo carries personal history, so pushes to public
 # template/starter repos are blocked wholesale — no ref parsing, no topic-
 # branch exceptions. Legitimate template contributions go through
-# /push-openbrain-template, which genericizes and pushes from a separate
-# template clone, never from the vault.
+# /push-openbrain-claude-starter, which genericizes and pushes from a
+# separate template clone, never from the vault.
 #
 # Protected URL patterns come from .openbrain/protected-remotes (one shell
 # glob per line; blank lines and # comments ignored). If that file does not
@@ -24,7 +24,10 @@ url="$2"
 
 patterns=()
 if [[ -f "$VAULT/.openbrain/protected-remotes" ]]; then
-  while IFS= read -r line; do
+  # `|| [[ -n "$line" ]]` keeps a final line that lacks a trailing newline;
+  # the ${line%$'\r'} strip tolerates CRLF line endings.
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
     [[ -z "$line" || "$line" == \#* ]] && continue
     patterns+=("$line")
   done < "$VAULT/.openbrain/protected-remotes"
@@ -38,8 +41,8 @@ for pat in "${patterns[@]}"; do
     $pat)
       echo "pre-push BLOCKED: '$url' matches protected pattern '$pat'." >&2
       echo "Vault refs carry personal history; this remote must not receive them." >&2
-      echo "Template contributions: use /push-openbrain-template (pushes from the" >&2
-      echo "template clone, not the vault). Adjust patterns in" >&2
+      echo "Template contributions: use /push-openbrain-claude-starter (pushes from" >&2
+      echo "the template clone, not the vault). Adjust patterns in" >&2
       echo ".openbrain/protected-remotes. Deliberate override: git push --no-verify." >&2
       exit 1
       ;;
