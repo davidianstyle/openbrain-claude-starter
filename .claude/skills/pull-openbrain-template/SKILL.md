@@ -47,11 +47,17 @@ VAULT="$(pwd)"
 TEMPLATE="${OPENBRAIN_TEMPLATE_DIR:-$HOME/openbrain-claude-starter}"
 ```
 
-If the template directory exists, pull the latest changes; otherwise clone it:
+If the template directory exists, sync it; otherwise clone it. **Branch-aware:** if the clone is already checked out on a non-`main` branch (e.g. a staging or integration branch prepared for this pull), keep that checkout and skip the pull — the user put it there deliberately. Announce which ref is being diffed and name it again in the final report.
 
 ```bash
 if [ -d "$TEMPLATE/.git" ]; then
-  cd "$TEMPLATE" && git checkout main && git pull --rebase --autostash
+  cd "$TEMPLATE"
+  BRANCH="$(git branch --show-current)"
+  if [ -z "$BRANCH" ] || [ "$BRANCH" = "main" ]; then
+    git checkout main && git pull --rebase --autostash
+  else
+    echo "template clone is on '$BRANCH' — diffing that tree as-is (no checkout/pull)"
+  fi
 else
   git clone git@github.com:davidianstyle/openbrain-claude-starter.git "$TEMPLATE"
 fi
