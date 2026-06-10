@@ -171,7 +171,7 @@ if ! git commit -m "$MSG" 2>&1 | tee -a "$LOG_FILE"; then
 fi
 
 if (( HAS_UPSTREAM )) && [[ "$AUTOPUSH" != "1" ]]; then
-  log "OPENBRAIN_AUTOPUSH=0 — committed locally, skipping push"
+  log "OPENBRAIN_AUTOPUSH=$AUTOPUSH — committed locally, skipping push"
 elif (( HAS_UPSTREAM )); then
   if ! git push 2>&1 | tee -a "$LOG_FILE"; then
     log "push failed, leaving local commit in place"
