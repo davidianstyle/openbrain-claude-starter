@@ -14,9 +14,12 @@ log() { printf '[on-start] %s\n' "$*" >&2; }
 # the vault never pushes to a protected remote (see pre-push.sh), and the
 # hook has to survive fresh clones and propagate via template pulls with no
 # human steps.
-if [[ -d "$VAULT/.git" && -f "$VAULT/.openbrain/pre-push.sh" ]]; then
-  HOOK="$VAULT/.git/hooks/pre-push"
+HOOKS_DIR="$(git rev-parse --git-path hooks 2>/dev/null)"
+if [[ -n "$HOOKS_DIR" && -f "$VAULT/.openbrain/pre-push.sh" ]]; then
+  [[ "$HOOKS_DIR" != /* ]] && HOOKS_DIR="$VAULT/$HOOKS_DIR"
+  HOOK="$HOOKS_DIR/pre-push"
   if [[ ! -e "$HOOK" ]] || ! cmp -s "$VAULT/.openbrain/pre-push.sh" "$HOOK"; then
+    mkdir -p "$HOOKS_DIR"
     ln -sf "$VAULT/.openbrain/pre-push.sh" "$HOOK"
     chmod +x "$VAULT/.openbrain/pre-push.sh"
     log "pre-push guardrail (re)linked"

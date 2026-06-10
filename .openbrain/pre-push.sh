@@ -25,8 +25,9 @@ url="$2"
 patterns=()
 if [[ -f "$VAULT/.openbrain/protected-remotes" ]]; then
   # `|| [[ -n "$line" ]]` keeps a final line that lacks a trailing newline;
-  # the ${line%$'\r'} strip tolerates CRLF line endings.
-  while IFS= read -r line || [[ -n "$line" ]]; do
+  # default IFS lets read trim stray leading/trailing whitespace; the
+  # ${line%$'\r'} strip tolerates CRLF line endings.
+  while read -r line || [[ -n "$line" ]]; do
     line="${line%$'\r'}"
     [[ -z "$line" || "$line" == \#* ]] && continue
     patterns+=("$line")
