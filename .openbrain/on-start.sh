@@ -10,6 +10,19 @@ cd "$VAULT" || exit 0
 
 log() { printf '[on-start] %s\n' "$*" >&2; }
 
+# Self-heal the pre-push guardrail (mirrors setup.sh's pre-commit linking):
+# the vault never pushes to a protected remote (see pre-push.sh), and the
+# hook has to survive fresh clones and propagate via template pulls with no
+# human steps.
+if [[ -d "$VAULT/.git" && -f "$VAULT/.openbrain/pre-push.sh" ]]; then
+  HOOK="$VAULT/.git/hooks/pre-push"
+  if [[ ! -e "$HOOK" ]] || ! cmp -s "$VAULT/.openbrain/pre-push.sh" "$HOOK"; then
+    ln -sf "$VAULT/.openbrain/pre-push.sh" "$HOOK"
+    chmod +x "$VAULT/.openbrain/pre-push.sh"
+    log "pre-push guardrail (re)linked"
+  fi
+fi
+
 # Only pull if the repo has a remote tracking branch
 if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
   git pull --rebase --autostash 2>&1 || log "pull failed (non-fatal)"

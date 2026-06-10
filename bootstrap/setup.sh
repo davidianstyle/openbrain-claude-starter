@@ -202,7 +202,7 @@ step "6/9 · Registering MCPs with Claude Code"
 # -----------------------------------------------------------------------------
 # Step 7: git hook
 # -----------------------------------------------------------------------------
-step "7/9 · Git hook"
+step "7/9 · Git hooks"
 if [[ -d "$REPO_ROOT/.git" ]]; then
   HOOK="$REPO_ROOT/.git/hooks/pre-commit"
   if [[ ! -e "$HOOK" ]] || ! cmp -s "$REPO_ROOT/.openbrain/pre-commit.sh" "$HOOK"; then
@@ -212,8 +212,16 @@ if [[ -d "$REPO_ROOT/.git" ]]; then
   else
     ok "pre-commit hook already linked"
   fi
+  PUSH_HOOK="$REPO_ROOT/.git/hooks/pre-push"
+  if [[ ! -e "$PUSH_HOOK" ]] || ! cmp -s "$REPO_ROOT/.openbrain/pre-push.sh" "$PUSH_HOOK"; then
+    ln -sf "$REPO_ROOT/.openbrain/pre-push.sh" "$PUSH_HOOK"
+    chmod +x "$REPO_ROOT/.openbrain/pre-push.sh"
+    ok "pre-push guardrail linked"
+  else
+    ok "pre-push guardrail already linked"
+  fi
 else
-  warn "not a git repo — skipping pre-commit hook. Run 'git init' then re-run this script."
+  warn "not a git repo — skipping git hooks. Run 'git init' then re-run this script."
 fi
 
 # -----------------------------------------------------------------------------

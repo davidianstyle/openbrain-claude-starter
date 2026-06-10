@@ -132,6 +132,7 @@ When a template in `+ Extras/Templates/` gains or removes a required frontmatter
 ## 10. Maintenance automation
 
 - **Pre-commit hook** (`.openbrain/pre-commit.sh`) — frontmatter + broken-link linter, warn-only. Linked by setup.sh into `.git/hooks/pre-commit`.
+- **Pre-push guardrail** (`.openbrain/pre-push.sh`) — blocks pushes from the vault to protected remote URLs (default: anything matching `*openbrain-claude-starter*`), since every vault ref carries personal history. Patterns configurable via `.openbrain/protected-remotes`. Linked by setup.sh into `.git/hooks/pre-push` and re-linked (self-healing) by on-start.sh.
 - **Auto git sync hooks** (opt-in, configured during setup):
   - **SessionStart hook** (`.openbrain/on-start.sh`) — `git pull --rebase` (fail-soft; never blocks).
   - **Stop hook** (`.openbrain/on-stop.sh`) — regenerates Home.md MOC index, then smart-commits all changes and pushes (skip-if-clean, pull-rebase first, conflict → inbox note).
