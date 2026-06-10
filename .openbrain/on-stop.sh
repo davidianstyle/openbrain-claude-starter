@@ -81,9 +81,14 @@ if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
   HAS_UPSTREAM=1
 fi
 
+# OPENBRAIN_AUTOPUSH=0 keeps commits local-only (pull --rebase still runs).
+# Set it where the hook is registered when origin is a repo that must not
+# receive vault content (e.g. a public template fork).
+AUTOPUSH="${OPENBRAIN_AUTOPUSH:-1}"
+
 # Skip if working tree clean (and nothing unpushed)
 if [[ -z "$(git status --porcelain)" ]]; then
-  if (( HAS_UPSTREAM )) && [[ -n "$(git log @{u}..HEAD 2>/dev/null)" ]]; then
+  if (( HAS_UPSTREAM )) && [[ "$AUTOPUSH" == "1" ]] && [[ -n "$(git log @{u}..HEAD 2>/dev/null)" ]]; then
     log "clean tree, but local commits ahead of upstream — pushing"
     git push 2>&1 | tee -a "$LOG_FILE" || true
   fi
@@ -165,7 +170,9 @@ if ! git commit -m "$MSG" 2>&1 | tee -a "$LOG_FILE"; then
   exit 0
 fi
 
-if (( HAS_UPSTREAM )); then
+if (( HAS_UPSTREAM )) && [[ "$AUTOPUSH" != "1" ]]; then
+  log "OPENBRAIN_AUTOPUSH=0 — committed locally, skipping push"
+elif (( HAS_UPSTREAM )); then
   if ! git push 2>&1 | tee -a "$LOG_FILE"; then
     log "push failed, leaving local commit in place"
     mkdir -p "$INBOX"
@@ -198,5 +205,9 @@ EOF
   fi
 fi
 
-log "committed${HAS_UPSTREAM:+ + pushed}: $MSG"
+if (( HAS_UPSTREAM )) && [[ "$AUTOPUSH" == "1" ]]; then
+  log "committed + pushed: $MSG"
+else
+  log "committed (local only): $MSG"
+fi
 exit 0

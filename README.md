@@ -146,7 +146,7 @@ All launched via `~/.config/openbrain/lib/*-mcp.sh` wrappers that source `~/.con
 - **Atomic notes.** One idea per note. If it wants to split, split it.
 - **Links over folders.** Structure comes from `[[wikilinks]]` and MOCs.
 - **Never delete, always archive.** Move to `+ Archive/`, never `rm`.
-- **Git is the sync layer.** No Obsidian Sync. Auto git sync (commit + push on stop, pull on start) is available as an opt-in during setup.
+- **Git is the sync layer.** No Obsidian Sync. Auto git sync (commit + push on stop, pull on start) is available as an opt-in during setup. Set `OPENBRAIN_AUTOPUSH=0` to keep auto-commits local-only (no push).
 - **Skills are markdown procedures.** Claude reads them and performs the steps.
 - **People are first-class entities.** Every person gets a note. Interactions link back. Cadence is tracked.
 - **Multi-account by default.** Every external service is wired per-account with routing tags.
