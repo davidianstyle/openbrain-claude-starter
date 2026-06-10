@@ -258,8 +258,8 @@ Skills live in `.claude/skills/<name>/SKILL.md` (vault-local, portable with the 
 | `/sync-places` | Discovery pass across Google Calendar — finds physical places not yet captured in `+ Atlas/Places/`, stages candidates in `+ Inbox/place-candidates/`. Facet-aware: surfaces when an existing Org should also get a Place note. |
 | `/weekly-review` | Monday synthesis → `+ Atlas/Weekly Reviews/<ISO-week>.md`. |
 | `/asana` | Quick view of tasks due in the next 7 days across configured workspaces, with interactive check-off. |
-| `/pull-openbrain-template` | Pull latest changes from the upstream starter, diff against this vault's infrastructure, and interactively apply each change. |
-| `/push-openbrain-template` | Genericize vault improvements and open a PR against the upstream starter — strips personal data, diffs, and creates the GitHub PR after review. |
+| `/pull-openbrain-claude-starter` | Pull latest changes from the upstream starter, diff against this vault's infrastructure, and interactively apply each change. |
+| `/push-openbrain-claude-starter` | Genericize vault improvements and open a PR against the upstream starter — strips personal data, diffs, and creates the GitHub PR after review. |
 
 Skills are markdown procedures only — they describe which MCP tools to call and which files to read/write. They do not execute code; Claude reads the SKILL.md and performs the steps.
 
