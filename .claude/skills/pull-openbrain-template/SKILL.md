@@ -1,5 +1,5 @@
 ---
-name: pull-openbrain-claude-starter
+name: pull-openbrain-template
 description: Pull the latest changes from the upstream openbrain-claude-starter repo, diff against this vault's infrastructure, and interactively apply each change with user approval.
 ---
 

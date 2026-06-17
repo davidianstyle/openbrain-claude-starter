@@ -1,5 +1,5 @@
 ---
-name: push-openbrain-claude-starter
+name: push-openbrain-template
 description: Genericize vault improvements and open a PR against the upstream openbrain-claude-starter repo — strips personal data, diffs, and creates a GitHub PR automatically after PII review.
 ---
 
