@@ -26,9 +26,29 @@ if [[ -n "$HOOKS_DIR" && -f "$VAULT/.openbrain/pre-push.sh" ]]; then
   fi
 fi
 
-# Only pull if the repo has a remote tracking branch
+# Only pull if the repo has a remote tracking branch — and only ever
+# fast-forward. A SessionStart hook must never rebase or stash: with the old
+# `git pull --rebase --autostash`, a rebase conflict silently sequestered
+# uncommitted vault notes into an autostash reachable only via `git fsck`,
+# while the hook reported a non-fatal pull failure and left the repo
+# mid-rebase. `--ff-only` either applies cleanly or refuses and touches
+# nothing; reconciling a divergence is an interactive job, never a hook's.
 if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
-  git pull --rebase --autostash 2>&1 || log "pull failed (non-fatal)"
+  if pull_out="$(git pull --ff-only 2>&1)"; then
+    : # already up to date, or clean fast-forward
+  elif git merge-base --is-ancestor '@{u}' HEAD 2>/dev/null; then
+    # Remote isn't ahead of us, so there was nothing to fast-forward and the
+    # failure is environmental (offline, auth, ...). Quiet non-fatal note.
+    log "pull failed (non-fatal): $(printf '%s' "$pull_out" | tail -1)"
+  else
+    log "!! PULL SKIPPED — cannot fast-forward from the remote."
+    log "!! $(printf '%s' "$pull_out" | tail -1)"
+    log "!! Local and remote histories have diverged (or incoming changes"
+    log "!! overlap uncommitted edits). Nothing was rebased, stashed, or"
+    log "!! modified — your notes are exactly as you left them."
+    log "!! Reconcile interactively when convenient: commit or stash local"
+    log "!! edits, then run: git pull --rebase"
+  fi
 else
   log "no upstream configured, skipping pull"
 fi
