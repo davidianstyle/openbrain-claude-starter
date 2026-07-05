@@ -12,12 +12,11 @@ log() { printf '[on-start] %s\n' "$*" >&2; }
 
 # First error:/fatal: line of a git transcript, else its last line — the last
 # line of a multi-line git error is often a fragment ("and the repository
-# exists.") or progress noise ("Updating abc123..def456").
+# exists.") or progress noise ("Updating abc123..def456"). Single POSIX awk
+# pass: no grep/tail extensions, no pipefail interplay.
 err_line() {
-  local line
-  line="$(printf '%s\n' "$1" | grep -m1 -E '^(error|fatal):')" \
-    || line="$(printf '%s\n' "$1" | tail -1)"
-  printf '%s' "$line"
+  printf '%s\n' "$1" \
+    | awk '/^(error|fatal):/ { print; found = 1; exit } { last = $0 } END { if (!found) print last }'
 }
 
 # Self-heal the pre-push guardrail (mirrors setup.sh's pre-commit linking):
