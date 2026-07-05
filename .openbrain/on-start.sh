@@ -53,7 +53,8 @@ if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
   # core.sshCommand, then plain ssh) so a customized setup keeps working, and
   # an explicit user BatchMode option still wins (ssh: first value obtained
   # for a parameter is used).
-  ssh_cmd="${GIT_SSH_COMMAND:-$(git config core.sshCommand 2>/dev/null || echo ssh)}"
+  ssh_cmd="${GIT_SSH_COMMAND:-$(git config core.sshCommand 2>/dev/null)}"
+  ssh_cmd="${ssh_cmd:-ssh}"   # unset AND explicitly-empty both fall back to ssh
   if ! fetch_out="$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="$ssh_cmd -o BatchMode=yes" git fetch 2>&1)"; then
     # Couldn't reach the remote (offline, auth, ...). Quiet non-fatal note.
     log "fetch failed (non-fatal): $(err_line "$fetch_out")"
