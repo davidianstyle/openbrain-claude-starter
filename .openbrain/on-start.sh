@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # OpenBrain vault SessionStart hook.
-# Pulls latest from origin/main (rebase) so the session starts current.
-# Fails soft: network errors never block Claude from starting.
+# Pulls latest from origin/main (fast-forward only) so the session starts
+# current. Fails soft: network errors never block Claude from starting.
 
 set -uo pipefail
 
@@ -9,6 +9,16 @@ VAULT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$VAULT" || exit 0
 
 log() { printf '[on-start] %s\n' "$*" >&2; }
+
+# First error:/fatal: line of a git transcript, else its last line — the last
+# line of a multi-line git error is often a fragment ("and the repository
+# exists.") or progress noise ("Updating abc123..def456").
+err_line() {
+  local line
+  line="$(printf '%s\n' "$1" | grep -m1 -E '^(error|fatal):')" \
+    || line="$(printf '%s\n' "$1" | tail -1)"
+  printf '%s' "$line"
+}
 
 # Self-heal the pre-push guardrail (mirrors setup.sh's pre-commit linking):
 # the vault never pushes to a protected remote (see pre-push.sh), and the
@@ -31,18 +41,20 @@ fi
 # `git pull --rebase --autostash`, a rebase conflict silently sequestered
 # uncommitted vault notes into an autostash reachable only via `git fsck`,
 # while the hook reported a non-fatal pull failure and left the repo
-# mid-rebase. `--ff-only` either applies cleanly or refuses and touches
+# mid-rebase. Fast-forward either applies cleanly or refuses and touches
 # nothing; reconciling a divergence is an interactive job, never a hook's.
+# Fetch and merge run separately so a network failure (quiet note) is never
+# misreported as a divergence (loud warning) — e.g. offline while behind an
+# already-fetched @{u}.
 if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
-  if pull_out="$(git pull --ff-only 2>&1)"; then
+  if ! fetch_out="$(git fetch 2>&1)"; then
+    # Couldn't reach the remote (offline, auth, ...). Quiet non-fatal note.
+    log "fetch failed (non-fatal): $(err_line "$fetch_out")"
+  elif merge_out="$(git merge --ff-only '@{u}' 2>&1)"; then
     : # already up to date, or clean fast-forward
-  elif git merge-base --is-ancestor '@{u}' HEAD 2>/dev/null; then
-    # Remote isn't ahead of us, so there was nothing to fast-forward and the
-    # failure is environmental (offline, auth, ...). Quiet non-fatal note.
-    log "pull failed (non-fatal): $(printf '%s' "$pull_out" | tail -1)"
   else
     log "!! PULL SKIPPED — cannot fast-forward from the remote."
-    log "!! $(printf '%s' "$pull_out" | tail -1)"
+    log "!! $(err_line "$merge_out")"
     log "!! Local and remote histories have diverged (or incoming changes"
     log "!! overlap uncommitted edits). Nothing was rebased, stashed, or"
     log "!! modified — your notes are exactly as you left them."
