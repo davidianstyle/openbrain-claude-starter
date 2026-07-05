@@ -16,7 +16,7 @@ log() { printf '[on-start] %s\n' "$*" >&2; }
 # pass: no grep/tail extensions, no pipefail interplay.
 err_line() {
   printf '%s\n' "$1" \
-    | awk '/^(error|fatal):/ { print; found = 1; exit } { last = $0 } END { if (!found) print last }'
+    | awk '/^(error|fatal):/ { print; found = 1; exit } NF { last = $0 } END { if (!found) print last }'
 }
 
 # Self-heal the pre-push guardrail (mirrors setup.sh's pre-commit linking):
@@ -46,7 +46,15 @@ fi
 # misreported as a divergence (loud warning) — e.g. offline while behind an
 # already-fetched @{u}.
 if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
-  if ! fetch_out="$(git fetch 2>&1)"; then
+  # Never prompt from a hook: git and ssh both prompt via /dev/tty, so a
+  # credential/passphrase/host-key ask would hang the session start.
+  # GIT_TERMINAL_PROMPT=0 fails HTTP credential asks fast; BatchMode does the
+  # same for ssh — appended to the user's own ssh command (env var, then
+  # core.sshCommand, then plain ssh) so a customized setup keeps working, and
+  # an explicit user BatchMode option still wins (ssh: first value obtained
+  # for a parameter is used).
+  ssh_cmd="${GIT_SSH_COMMAND:-$(git config core.sshCommand 2>/dev/null || echo ssh)}"
+  if ! fetch_out="$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="$ssh_cmd -o BatchMode=yes" git fetch 2>&1)"; then
     # Couldn't reach the remote (offline, auth, ...). Quiet non-fatal note.
     log "fetch failed (non-fatal): $(err_line "$fetch_out")"
   elif merge_out="$(git merge --ff-only '@{u}' 2>&1)"; then
