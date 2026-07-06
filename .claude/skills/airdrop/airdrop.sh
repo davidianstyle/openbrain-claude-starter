@@ -49,7 +49,13 @@ for f in "$@"; do
   [ -e "$f" ] || { echo "airdrop: no such file: $f" >&2; exit 1; }
   # pwd -P: hand sharingd a physical path — symlinked segments (e.g. /tmp ->
   # /private/tmp) can trip sandbox/permission checks in system services.
-  files+=("$(cd -- "$(dirname -- "$f")" && pwd -P)/$(basename -- "$f")")
+  # Directories resolve directly (dirname/basename on '.' or a trailing slash
+  # would yield an unclean '/path/.'-style result).
+  if [ -d "$f" ]; then
+    files+=("$(cd -- "$f" && pwd -P)")
+  else
+    files+=("$(cd -- "$(dirname -- "$f")" && pwd -P)/$(basename -- "$f")")
+  fi
 done
 
 # A helper orphaned by a previous run holds a ghost window on screen; clear it.
