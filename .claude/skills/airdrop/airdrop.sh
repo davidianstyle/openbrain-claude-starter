@@ -41,11 +41,13 @@ KEEPALIVE="${AIRDROP_KEEPALIVE:-600}"
 files=()
 for f in "$@"; do
   [ -e "$f" ] || { echo "airdrop: no such file: $f" >&2; exit 1; }
-  files+=("$(cd "$(dirname "$f")" && pwd)/$(basename "$f")")
+  files+=("$(cd -- "$(dirname -- "$f")" && pwd)/$(basename -- "$f")")
 done
 
 # A helper orphaned by a previous run holds a ghost window on screen; clear it.
-pkill -f "$MARKER" 2>/dev/null && sleep 1 || true
+# Match only the osascript helper (its -e program embeds the marker) — never
+# this script itself, even if a repo path happens to contain the marker string.
+pkill -f "osascript.*$MARKER" 2>/dev/null && sleep 1 || true
 
 afu_read() { defaults read com.apple.sharingd "$AFU_KEY" 2>/dev/null || echo "ABSENT"; }
 AFU_BEFORE="$(afu_read)"
