@@ -34,7 +34,11 @@ mkdir -p "$(dirname "$SETTINGS_FILE")"
 import json, os, re, sys
 from pathlib import Path
 
+# resolve() so a symlinked settings.json (dotfiles managers) keeps its link:
+# the temp-sibling + os.replace lands on the TARGET, not over the symlink.
 settings_path = Path(sys.argv[1])
+if settings_path.exists():
+    settings_path = settings_path.resolve()
 repo_root = sys.argv[2].rstrip("/")
 
 # Canonical openbrain hooks. timeout/statusMessage are used ONLY when CREATING a

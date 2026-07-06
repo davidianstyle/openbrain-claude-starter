@@ -111,7 +111,9 @@ PY
 import json, os, sys, time
 from pathlib import Path
 
-claude_path = Path(sys.argv[1])
+# resolve() so a symlinked ~/.claude.json (dotfiles managers) keeps its link:
+# the temp-sibling + os.replace lands on the TARGET, not over the symlink.
+claude_path = Path(sys.argv[1]).resolve()
 plan = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 lib_dir = plan["lib_dir"].rstrip("/")
 
