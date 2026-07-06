@@ -123,6 +123,10 @@ except Exception as e:
     sys.stderr.write(f"[register-mcps] ABORT: {claude_path} is not valid JSON ({e}); "
                      f"not modifying it and not overwriting backups\n")
     sys.exit(1)
+if not isinstance(data, dict):
+    sys.stderr.write(f"[register-mcps] ABORT: {claude_path} parses to {type(data).__name__}, "
+                     f"not an object; not modifying it\n")
+    sys.exit(1)
 
 # Keep-last-good, timestamped backup (never clobber the single prior backup;
 # a re-run over a freshly-corrupted file would otherwise destroy the only copy).
@@ -154,7 +158,9 @@ def stdio(name, script, *args):
 managed_prefixes = ("asana_", "gmail_", "gcal_", "gmeet_", "gdrive_", "gslides_", "google_", "slack_")
 for k in list(servers.keys()):
     v = servers[k]
-    cmd = v.get("command", "") if isinstance(v, dict) else ""
+    cmd = v.get("command") if isinstance(v, dict) else ""
+    if not isinstance(cmd, str):
+        cmd = ""  # explicit null / non-string command is never ours
     if k == "fathom" or k.startswith(managed_prefixes):
         # normpath both sides: lexical differences (double slashes, ./ or ..
         # segments) must not let a managed entry dodge the guard or vice versa.
