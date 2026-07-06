@@ -51,6 +51,7 @@ launcher_drift=0
 hook_drift=0
 
 # Launchers: changed or missing (managed set only: *-mcp.sh + _common.sh).
+shopt -s nullglob
 for f in "$SRC_LIB"/*-mcp.sh "$SRC_LIB/_common.sh"; do
   [ -e "$f" ] || continue
   dest="$LIB_DIR/$(basename "$f")"
@@ -59,6 +60,7 @@ for f in "$SRC_LIB"/*-mcp.sh "$SRC_LIB/_common.sh"; do
     launcher_drift=1
   fi
 done
+shopt -u nullglob
 # Launchers: orphaned (managed *-mcp.sh in runtime with no tracked source).
 shopt -s nullglob
 for dest in "$LIB_DIR"/*-mcp.sh; do

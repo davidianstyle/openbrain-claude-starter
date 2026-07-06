@@ -86,11 +86,13 @@ def owned_span(cmd, basename):
         if start != -1:
             return cmd[start:end + 1]
     # Unquoted: the path begins at the nearest preceding whitespace-delimited
-    # token that starts an absolute/home path; interior spaced fragments
-    # (e.g. 'Vault/.openbrain/…') don't start with / ~ $.
+    # token that starts an absolute, home, variable, or dot-relative path;
+    # interior spaced fragments (e.g. 'Vault/.openbrain/…') don't start with
+    # / ~ $ or '.' — without '.' here, './repo/.openbrain/…' would walk past
+    # the path into an env prepend and clobber it on replacement.
     toks = cmd[:end].split(" ")
     j = len(toks) - 1
-    while j > 0 and not toks[j].startswith(("/", "~", "$")):
+    while j > 0 and not toks[j].startswith(("/", "~", "$", ".")):
         j -= 1
     return " ".join(toks[j:])
 

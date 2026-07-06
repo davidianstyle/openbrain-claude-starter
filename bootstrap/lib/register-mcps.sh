@@ -112,13 +112,13 @@ import json, os, sys, time
 from pathlib import Path
 
 claude_path = Path(sys.argv[1])
-plan = json.load(open(sys.argv[2]))
+plan = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 lib_dir = plan["lib_dir"].rstrip("/")
 
 # Parse the live file FIRST. If it doesn't parse, abort before touching any
 # backup — never let a corrupt registry overwrite the last good backup.
 try:
-    data = json.loads(claude_path.read_text())
+    data = json.loads(claude_path.read_text(encoding="utf-8"))
 except Exception as e:
     sys.stderr.write(f"[register-mcps] ABORT: {claude_path} is not valid JSON ({e}); "
                      f"not modifying it and not overwriting backups\n")
@@ -156,7 +156,9 @@ for k in list(servers.keys()):
     v = servers[k]
     cmd = v.get("command", "") if isinstance(v, dict) else ""
     if k == "fathom" or k.startswith(managed_prefixes):
-        if os.path.dirname(cmd) == lib_dir:
+        # normpath both sides: lexical differences (double slashes, ./ or ..
+        # segments) must not let a managed entry dodge the guard or vice versa.
+        if os.path.normpath(os.path.dirname(cmd)) == os.path.normpath(lib_dir):
             del servers[k]
 
 if plan["has_asana_personal"]:
