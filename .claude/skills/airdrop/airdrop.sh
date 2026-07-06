@@ -37,11 +37,19 @@ AFU_KEY="AfterFirstUseExpirationDate"
 [ $# -ge 1 ] || { echo "usage: airdrop.sh <file> [file...]" >&2; exit 1; }
 
 KEEPALIVE="${AIRDROP_KEEPALIVE:-600}"
+# Validate before it reaches parseInt in the JXA program: a non-numeric or
+# zero value would become NaN/0 ticks there and misreport an instant TIMEOUT.
+case "$KEEPALIVE" in
+  "" | *[!0-9]*) echo "airdrop: AIRDROP_KEEPALIVE must be a positive integer (got '$KEEPALIVE')" >&2; exit 1 ;;
+esac
+[ "$KEEPALIVE" -ge 1 ] || { echo "airdrop: AIRDROP_KEEPALIVE must be a positive integer (got '$KEEPALIVE')" >&2; exit 1; }
 
 files=()
 for f in "$@"; do
   [ -e "$f" ] || { echo "airdrop: no such file: $f" >&2; exit 1; }
-  files+=("$(cd -- "$(dirname -- "$f")" && pwd)/$(basename -- "$f")")
+  # pwd -P: hand sharingd a physical path — symlinked segments (e.g. /tmp ->
+  # /private/tmp) can trip sandbox/permission checks in system services.
+  files+=("$(cd -- "$(dirname -- "$f")" && pwd -P)/$(basename -- "$f")")
 done
 
 # A helper orphaned by a previous run holds a ghost window on screen; clear it.
@@ -70,7 +78,7 @@ JXA='function run(argv) { /* '"$MARKER"' */
       "sharingService:didFailToShareItems:error:": {
         types: ["void", ["id", "id", "id"]],
         implementation: function (service, items, error) {
-          outcome = "FAILED: " + error.localizedDescription.js;
+          outcome = "FAILED: " + (error.isNil() ? "unknown error (service reported failure with no NSError)" : error.localizedDescription.js);
         }
       }
     }
