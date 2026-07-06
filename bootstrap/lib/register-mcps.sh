@@ -128,7 +128,7 @@ except Exception as e:
 # a re-run over a freshly-corrupted file would otherwise destroy the only copy).
 stamp = time.strftime("%Y%m%d-%H%M%S")
 backup = claude_path.with_name(claude_path.name + f".openbrain-backup-{stamp}")
-backup.write_text(json.dumps(data, indent=2))
+backup.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 # Prune to the most recent 5 backups.
 backups = sorted(claude_path.parent.glob(claude_path.name + ".openbrain-backup-*"))
 for old in backups[:-5]:
@@ -180,10 +180,10 @@ if plan["has_fathom"]:
 # Atomic write: serialize, write to a temp sibling, parse-verify, then
 # os.replace (atomic on the same filesystem). A crash mid-write can't leave a
 # truncated/unparseable ~/.claude.json that would brick Claude Code.
-payload = json.dumps(data, indent=2)
+payload = json.dumps(data, indent=2, ensure_ascii=False)
 json.loads(payload)  # paranoia: the bytes we're about to commit must parse
 tmp = claude_path.with_name(claude_path.name + ".openbrain-tmp")
-tmp.write_text(payload)
+tmp.write_text(payload, encoding="utf-8")
 os.replace(tmp, claude_path)
 
 print(f"[register-mcps] backup: {backup}")

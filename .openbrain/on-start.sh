@@ -57,12 +57,17 @@ fi
 # notice is one-shot — this surfaces it every session until deployed. Fail-soft;
 # never blocks session start, and reads nothing secret (--check is secret-blind).
 if [[ -x "$VAULT/.openbrain/lib/reconcile-runtime.sh" ]]; then
-  if drift_out="$("$VAULT/.openbrain/lib/reconcile-runtime.sh" --check 2>/dev/null)"; then
-    : # exit 0 → runtime in sync, stay silent
-  elif (( $? == 10 )); then
+  # Capture the exit code explicitly — an `elif (( $? == 10 ))` reads whatever
+  # ran last and silently swallows unexpected codes (crash, permissions), the
+  # same silent-failure class the drift check exists to prevent.
+  drift_rc=0
+  drift_out="$("$VAULT/.openbrain/lib/reconcile-runtime.sh" --check 2>/dev/null)" || drift_rc=$?
+  if (( drift_rc == 10 )); then
     log "runtime drift — deployed launchers/hooks are behind the vault:"
     printf '%s\n' "$drift_out" | grep -v '^\[reconcile\]' >&2
     log "deploy with: bash .openbrain/lib/reconcile-runtime.sh --apply"
+  elif (( drift_rc != 0 )); then
+    log "runtime drift check FAILED (exit $drift_rc) — run manually: bash .openbrain/lib/reconcile-runtime.sh --check"
   fi
 fi
 

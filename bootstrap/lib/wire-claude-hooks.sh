@@ -31,7 +31,7 @@ SETTINGS_FILE="${2:-$WCH_REPO_ROOT/.claude/settings.json}"
 mkdir -p "$(dirname "$SETTINGS_FILE")"
 
 "$PYTHON_BIN" - "$SETTINGS_FILE" "$WCH_REPO_ROOT" <<'PY'
-import json, os, sys
+import json, os, re, sys
 from pathlib import Path
 
 settings_path = Path(sys.argv[1])
@@ -50,13 +50,13 @@ CANON = {
 # corrupt file rather than silently discard it).
 data = {}
 if settings_path.exists():
-    raw = settings_path.read_text()
+    raw = settings_path.read_text(encoding="utf-8")
     if raw.strip():
         try:
             data = json.loads(raw)
         except Exception:
             bak = settings_path.with_name(settings_path.name + ".corrupt-backup")
-            bak.write_text(raw)
+            bak.write_text(raw, encoding="utf-8")
             sys.stderr.write(f"[wire-claude-hooks] existing settings.json was unparseable; "
                              f"backed up to {bak}, regenerating hooks block\n")
             data = {}
@@ -85,16 +85,25 @@ def owned_span(cmd, basename):
         start = cmd.rfind(q, 0, idx)
         if start != -1:
             return cmd[start:end + 1]
-    # Unquoted: the path begins at the nearest preceding whitespace-delimited
-    # token that starts an absolute, home, variable, or dot-relative path;
-    # interior spaced fragments (e.g. 'Vault/.openbrain/…') don't start with
-    # / ~ $ or '.' — without '.' here, './repo/.openbrain/…' would walk past
-    # the path into an env prepend and clobber it on replacement.
+    # Unquoted: scan from the LEFT, skipping tokens that cannot start the
+    # script path — env prepends (NAME=VALUE) and wrapper words/flags with no
+    # path shape (e.g. 'bash', 'nice', '-n', '10'). Everything from the first
+    # path-shaped token through the suffix is the span. A backward scan keyed
+    # on token prefixes is ambiguous here: an interior fragment of a spaced
+    # path may itself start with '.', '~', '$' or '/' ('My .secret/…') and
+    # would truncate the span.
     toks = cmd[:end].split(" ")
-    j = len(toks) - 1
-    while j > 0 and not toks[j].startswith(("/", "~", "$", ".")):
-        j -= 1
-    return " ".join(toks[j:])
+    i = 0
+    while i < len(toks) - 1:
+        t = toks[i]
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t):
+            i += 1  # env-assignment prepend
+            continue
+        if "/" not in t and not t.startswith(("~", "$", ".")):
+            i += 1  # wrapper word or flag (no path shape)
+            continue
+        break
+    return " ".join(toks[i:])
 
 def unquoted(span):
     """The path inside a span, quotes removed if present."""
@@ -164,10 +173,10 @@ for event, spec in CANON.items():
         changed.append(f"{event}: deduped {len(owned)-1} stale")
 
 # Atomic + validated write.
-payload = json.dumps(data, indent=2) + "\n"
+payload = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 json.loads(payload)  # must parse before we commit it
 tmp = settings_path.with_name(settings_path.name + ".openbrain-tmp")
-tmp.write_text(payload)
+tmp.write_text(payload, encoding="utf-8")
 os.replace(tmp, settings_path)
 
 if changed:
