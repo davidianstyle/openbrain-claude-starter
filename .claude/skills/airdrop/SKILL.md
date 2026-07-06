@@ -18,10 +18,11 @@ macOS keeps two actions human by design: choosing the receiving device in the Ai
 ## Procedure
 
 1. Verify each input path exists. If one doesn't, stop and tell the user which.
-2. Run the bundled helper **as a background task** (it blocks until the AirDrop session ends, which includes human reaction time):
+2. Run the bundled helper **as a background task** (it blocks until the AirDrop session ends, which includes human reaction time). Invoke it by its **absolute path inside this skill's own directory** — the "Base directory for this skill" you're given at invocation — so it works from any cwd, whether this skill loaded from the vault or from a global install:
    ```bash
-   bash .claude/skills/airdrop/airdrop.sh <file> [file...]
+   bash "<skill-base-dir>/airdrop.sh" <file> [file...]
    ```
+   Substitute `<skill-base-dir>` with the absolute base directory shown for this skill. **Do not** use a cwd-relative path like `.claude/skills/airdrop/airdrop.sh` — a non-vault session won't resolve it. (The helper canonicalizes each file arg to an absolute path itself, so it's otherwise cwd-independent.)
 3. Immediately tell the user:
    - Click the receiving device in the window, then leave it alone. Cancel aborts; Esc and close-box do nothing — the window dismisses itself when the session ends.
    - If the receiver uses a different Apple ID, answer the Accept prompt on that machine; an unanswered prompt looks like a hang.
