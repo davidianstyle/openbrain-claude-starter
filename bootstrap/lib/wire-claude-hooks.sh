@@ -118,7 +118,11 @@ for event, spec in CANON.items():
     for g in groups:
         if not isinstance(g, dict):
             continue
-        for h in g.get("hooks", []):
+        # "hooks" may be explicitly null or a non-list — iterate only a real list.
+        inner = g.get("hooks")
+        if not isinstance(inner, list):
+            continue
+        for h in inner:
             if isinstance(h, dict) and isinstance(h.get("command"), str):
                 if owned_span(h["command"], basename) is not None:
                     owned.append((g, h))

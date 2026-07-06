@@ -75,9 +75,17 @@ shopt -u nullglob
 tmpdir="$(mktemp -d)"; trap 'rm -rf "$tmpdir"' EXIT
 if [ -f "$SETTINGS_FILE" ]; then
   cp "$SETTINGS_FILE" "$tmpdir/settings.json"
-  bash "$VAULT/bootstrap/lib/wire-claude-hooks.sh" "$VAULT" "$tmpdir/settings.json" >/dev/null 2>&1 || true
-  if ! cmp -s "$SETTINGS_FILE" "$tmpdir/settings.json" 2>/dev/null; then
-    findings="${findings}  hook-wiring: openbrain SessionStart/Stop entries need (re)wiring"$'\n'
+  # A wirer failure must count as drift, not be swallowed: with a bare
+  # `|| true`, a crash leaves the copy untouched, cmp matches, and the check
+  # falsely reports no hook drift. Flagging drift instead routes --apply to
+  # run the wirer against the live file, where the real error surfaces loudly.
+  if bash "$VAULT/bootstrap/lib/wire-claude-hooks.sh" "$VAULT" "$tmpdir/settings.json" >/dev/null 2>&1; then
+    if ! cmp -s "$SETTINGS_FILE" "$tmpdir/settings.json" 2>/dev/null; then
+      findings="${findings}  hook-wiring: openbrain SessionStart/Stop entries need (re)wiring"$'\n'
+      hook_drift=1
+    fi
+  else
+    findings="${findings}  hook-wiring: wire-claude-hooks.sh FAILED against current settings.json (drift state unknown — run --apply to surface the error)"$'\n'
     hook_drift=1
   fi
 else
