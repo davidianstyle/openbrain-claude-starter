@@ -52,4 +52,18 @@ if [[ -x "$VAULT/bootstrap/lib/refresh-google-tokens.sh" && -d "$HOME/.config/op
   fi
 fi
 
+# Re-nag on runtime drift: if a pulled change to MCP launchers or hook wiring
+# hasn't been deployed to the per-machine runtime, the pull's restart-required
+# notice is one-shot — this surfaces it every session until deployed. Fail-soft;
+# never blocks session start, and reads nothing secret (--check is secret-blind).
+if [[ -x "$VAULT/.openbrain/lib/reconcile-runtime.sh" ]]; then
+  if drift_out="$("$VAULT/.openbrain/lib/reconcile-runtime.sh" --check 2>/dev/null)"; then
+    : # exit 0 → runtime in sync, stay silent
+  elif (( $? == 10 )); then
+    log "runtime drift — deployed launchers/hooks are behind the vault:"
+    printf '%s\n' "$drift_out" | grep -v '^\[reconcile\]' >&2
+    log "deploy with: bash .openbrain/lib/reconcile-runtime.sh --apply"
+  fi
+fi
+
 exit 0

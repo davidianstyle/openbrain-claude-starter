@@ -248,42 +248,12 @@ EOF
     ok "git remote already configured"
   fi
 
-  SETTINGS_FILE="$REPO_ROOT/.claude/settings.json"
-  mkdir -p "$(dirname "$SETTINGS_FILE")"
-  "$PYTHON_BIN" - "$SETTINGS_FILE" "$REPO_ROOT" <<'PY'
-import json, sys
-from pathlib import Path
-
-settings_path = Path(sys.argv[1])
-repo_root = sys.argv[2]
-
-data = {}
-if settings_path.exists():
-    try:
-        data = json.loads(settings_path.read_text())
-    except Exception:
-        pass
-
-hooks = data.setdefault("hooks", {})
-hooks["SessionStart"] = [{
-    "hooks": [{
-        "type": "command",
-        "command": f"{repo_root}/.openbrain/on-start.sh",
-        "timeout": 30,
-        "statusMessage": "OpenBrain: pulling latest"
-    }]
-}]
-hooks["Stop"] = [{
-    "hooks": [{
-        "type": "command",
-        "command": f"{repo_root}/.openbrain/on-stop.sh",
-        "timeout": 120,
-        "statusMessage": "OpenBrain: syncing to git"
-    }]
-}]
-
-settings_path.write_text(json.dumps(data, indent=2) + "\n")
-PY
+  # Wire the auto-sync hooks via the shared, merge-safe wirer — the single
+  # source of truth for this wiring (the pull's runtime-reconcile calls the same
+  # script). On a fresh install it creates the canonical entries; on a re-run it
+  # preserves any user customizations (env prepend, timeout, statusMessage) and
+  # only fixes a stale script path.
+  bash "$REPO_ROOT/bootstrap/lib/wire-claude-hooks.sh" "$REPO_ROOT"
   ok "auto git sync hooks enabled in .claude/settings.json"
 else
   ok "skipped — you can enable them later by re-running setup or editing .claude/settings.json"

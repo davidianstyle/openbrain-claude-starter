@@ -12,11 +12,16 @@
 # Resolve paths relative to THIS file (bootstrap/lib/common.sh)
 COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$COMMON_DIR/../.." && pwd)"
-CONFIG_DIR="$HOME/.config/openbrain"
-LIB_DIR="$CONFIG_DIR/lib"
-ENV_FILE="$CONFIG_DIR/.env"
-TOKEN_DIR="$CONFIG_DIR/tokens"
-VENV_DIR="$CONFIG_DIR/venv"
+# Runtime locations default to the real per-machine config, but each is
+# overridable via env so the deploy path (register-mcps.sh et al.) can be
+# exercised against a throwaway runtime in tests — NEVER against live config.
+# CLAUDE_JSON is overridable for the same reason (register-mcps mutates it).
+CONFIG_DIR="${OPENBRAIN_CONFIG_DIR:-$HOME/.config/openbrain}"
+LIB_DIR="${OPENBRAIN_LIB_DIR:-$CONFIG_DIR/lib}"
+ENV_FILE="${OPENBRAIN_ENV_FILE:-$CONFIG_DIR/.env}"
+TOKEN_DIR="${OPENBRAIN_TOKEN_DIR:-$CONFIG_DIR/tokens}"
+VENV_DIR="${OPENBRAIN_VENV_DIR:-$CONFIG_DIR/venv}"
+CLAUDE_JSON="${OPENBRAIN_CLAUDE_JSON:-$HOME/.claude.json}"
 DRIVE_TOKEN_ROOT="$HOME/.config/google-docs-mcp"
 
 # ---------- colors + logging ----------

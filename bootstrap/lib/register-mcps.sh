@@ -19,7 +19,8 @@ source "$HERE/common.sh"
 ensure_python3
 load_env
 
-CLAUDE_JSON="$HOME/.claude.json"
+# CLAUDE_JSON comes from common.sh (overridable via OPENBRAIN_CLAUDE_JSON for
+# sandboxed testing — never point it at live config in a test).
 [[ -f "$CLAUDE_JSON" ]] || die "$CLAUDE_JSON not found — start Claude Code at least once to initialize it"
 
 # -----------------------------------------------------------------------------
@@ -27,7 +28,12 @@ CLAUDE_JSON="$HOME/.claude.json"
 # -----------------------------------------------------------------------------
 mkdir -p "$LIB_DIR"
 chmod 755 "$LIB_DIR"
-for f in "$REPO_ROOT/.openbrain/lib/"*.sh; do
+# Deploy ONLY the runtime launcher set: the *-mcp.sh launchers plus the
+# _common.sh they source. Other .openbrain/lib/*.sh (clone-pii-gate.sh,
+# rebuild-next.sh) are clone-tier tooling that runs from the repo, not the
+# per-machine runtime — don't pollute LIB_DIR with them.
+for f in "$REPO_ROOT/.openbrain/lib/"*-mcp.sh "$REPO_ROOT/.openbrain/lib/_common.sh"; do
+  [[ -e "$f" ]] || continue
   dest="$LIB_DIR/$(basename "$f")"
   if ! cmp -s "$f" "$dest" 2>/dev/null; then
     cp "$f" "$dest"
@@ -102,18 +108,33 @@ PY
 # 3. Merge plan into ~/.claude.json
 # -----------------------------------------------------------------------------
 "$PYTHON_BIN" - "$CLAUDE_JSON" "$PLAN" <<'PY'
-import json, shutil, sys
+import json, os, sys, time
 from pathlib import Path
 
 claude_path = Path(sys.argv[1])
 plan = json.load(open(sys.argv[2]))
-lib_dir = plan["lib_dir"]
+lib_dir = plan["lib_dir"].rstrip("/")
 
-# Backup
-backup = claude_path.with_suffix(".json.openbrain-backup")
-shutil.copy2(claude_path, backup)
+# Parse the live file FIRST. If it doesn't parse, abort before touching any
+# backup — never let a corrupt registry overwrite the last good backup.
+try:
+    data = json.loads(claude_path.read_text())
+except Exception as e:
+    sys.stderr.write(f"[register-mcps] ABORT: {claude_path} is not valid JSON ({e}); "
+                     f"not modifying it and not overwriting backups\n")
+    sys.exit(1)
 
-data = json.loads(claude_path.read_text())
+# Keep-last-good, timestamped backup (never clobber the single prior backup;
+# a re-run over a freshly-corrupted file would otherwise destroy the only copy).
+stamp = time.strftime("%Y%m%d-%H%M%S")
+backup = claude_path.with_name(claude_path.name + f".openbrain-backup-{stamp}")
+backup.write_text(json.dumps(data, indent=2))
+# Prune to the most recent 5 backups.
+backups = sorted(claude_path.parent.glob(claude_path.name + ".openbrain-backup-*"))
+for old in backups[:-5]:
+    try: old.unlink()
+    except OSError: pass
+
 servers = data.setdefault("mcpServers", {})
 
 def stdio(name, script, *args):
@@ -124,15 +145,18 @@ def stdio(name, script, *args):
         "env": {},
     }
 
-# Remove any openbrain-managed entries before re-writing
+# Remove openbrain-managed entries before re-writing. PRECISE guard: an entry is
+# ours iff its command launcher lives in OUR lib_dir — not the old fragile
+# 'openbrain' substring, which would falsely delete a user's server named
+# google_*/slack_* whose command path merely contained "openbrain"
+# (e.g. ~/openbrain-tools/...). The prefix list only narrows which keys we even
+# consider, so a foreign server outside lib_dir is always safe.
 managed_prefixes = ("asana_", "gmail_", "gcal_", "gmeet_", "gdrive_", "gslides_", "google_", "slack_")
-# ↑ Legacy per-service prefixes (gmail_, gcal_, etc.) kept in the cleanup list
-#   so re-running register-mcps removes stale entries from ~/.claude.json
 for k in list(servers.keys()):
     v = servers[k]
     cmd = v.get("command", "") if isinstance(v, dict) else ""
     if k == "fathom" or k.startswith(managed_prefixes):
-        if "openbrain" in cmd:
+        if os.path.dirname(cmd) == lib_dir:
             del servers[k]
 
 if plan["has_asana_personal"]:
@@ -151,13 +175,41 @@ for slug in plan["slack_slugs"]:
 if plan["has_fathom"]:
     stdio("fathom", "fathom-mcp.sh")
 
-claude_path.write_text(json.dumps(data, indent=2))
+# Atomic write: serialize, write to a temp sibling, parse-verify, then
+# os.replace (atomic on the same filesystem). A crash mid-write can't leave a
+# truncated/unparseable ~/.claude.json that would brick Claude Code.
+payload = json.dumps(data, indent=2)
+json.loads(payload)  # paranoia: the bytes we're about to commit must parse
+tmp = claude_path.with_name(claude_path.name + ".openbrain-tmp")
+tmp.write_text(payload)
+os.replace(tmp, claude_path)
 
 print(f"[register-mcps] backup: {backup}")
 print(f"[register-mcps] wrote {len(servers)} total MCP servers to {claude_path}")
 for name in sorted(servers.keys()):
     print(f"  • {name}")
 PY
+
+# -----------------------------------------------------------------------------
+# 4. Reconcile launcher FILES: remove managed *-mcp.sh launchers in LIB_DIR
+#    whose source no longer exists in the repo (e.g. legacy split launchers
+#    gcal/gmail/gmeet/gdrive-mcp.sh from before the google-mcp consolidation).
+#    Runs AFTER the registry rewrite above, so no live mcpServers entry can
+#    still point at a launcher we remove. Strictly scoped to *-mcp.sh — never
+#    touches _common.sh, shims/, or non-launcher files. Backs up rather than rm
+#    (files under ~/.config are not git-recoverable).
+# -----------------------------------------------------------------------------
+shopt -s nullglob
+orphan_backup="$LIB_DIR/.orphaned-launchers"
+for dest in "$LIB_DIR"/*-mcp.sh; do
+  src="$REPO_ROOT/.openbrain/lib/$(basename "$dest")"
+  if [[ ! -e "$src" ]]; then
+    mkdir -p "$orphan_backup"
+    mv -f "$dest" "$orphan_backup/$(basename "$dest").$(date +%Y%m%d-%H%M%S)"
+    warn "orphaned launcher removed (backed up to $orphan_backup): $(basename "$dest")"
+  fi
+done
+shopt -u nullglob
 
 step "Done registering MCPs"
 info "Restart Claude Code so it picks up the new mcpServers entries"
