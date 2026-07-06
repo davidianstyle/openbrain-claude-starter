@@ -120,10 +120,14 @@ result="$(osascript -l JavaScript -e "$JXA" "$KEEPALIVE" "${files[@]}")" \
 
 if [ "$result" = "ENDED" ]; then
   AFU_AFTER="$(afu_read)"
-  if [ "$AFU_BEFORE" = "ABSENT" ] || [ "$AFU_AFTER" = "ABSENT" ]; then
+  # The signal is "the pref changed during the session": an advance AND a
+  # first-use creation (BEFORE absent, AFTER present) both mean a transfer
+  # started — Cancel stays put and cannot create the key. Only a still-absent
+  # AFTER leaves no signal at all, which degrades to the honest CLOSED.
+  if [ "$AFU_AFTER" = "ABSENT" ]; then
     echo "CLOSED: window closed; sent-vs-cancelled not verifiable on this system"
     exit 2
-  elif [ "$AFU_AFTER" != "$AFU_BEFORE" ]; then
+  elif [ "$AFU_BEFORE" = "ABSENT" ] || [ "$AFU_AFTER" != "$AFU_BEFORE" ]; then
     echo "SENT"
     exit 0
   else
