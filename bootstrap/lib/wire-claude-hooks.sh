@@ -67,13 +67,42 @@ hooks = data.setdefault("hooks", {})
 if not isinstance(hooks, dict):
     raise SystemExit("[wire-claude-hooks] .hooks is not an object; refusing to edit")
 
-def owned_path(cmd, basename):
-    """Return the path token in cmd ending in /.openbrain/<basename>, or None.
-    cmd may be 'ENV=x /abs/.openbrain/on-start.sh' — owns by suffix, not equality."""
-    for tok in cmd.split():
-        if tok.endswith("/.openbrain/" + basename):
-            return tok
-    return None
+def owned_span(cmd, basename):
+    """Return the exact substring of cmd that is the openbrain script path
+    (ending in /.openbrain/<basename>), including surrounding quotes if any,
+    or None. Handles env prepends ('ENV=x /abs/…'), quoted paths, and
+    unquoted paths containing spaces — token-splitting would return only the
+    last fragment of a spaced path and corrupt the command on replacement."""
+    suffix = "/.openbrain/" + basename
+    idx = cmd.find(suffix)
+    if idx == -1:
+        return None
+    end = idx + len(suffix)
+    # Quoted path: a closing quote right after the suffix with a matching
+    # opener earlier — return the span including its quotes.
+    if end < len(cmd) and cmd[end] in "'\"":
+        q = cmd[end]
+        start = cmd.rfind(q, 0, idx)
+        if start != -1:
+            return cmd[start:end + 1]
+    # Unquoted: the path begins at the nearest preceding whitespace-delimited
+    # token that starts an absolute/home path; interior spaced fragments
+    # (e.g. 'Vault/.openbrain/…') don't start with / ~ $.
+    toks = cmd[:end].split(" ")
+    j = len(toks) - 1
+    while j > 0 and not toks[j].startswith(("/", "~", "$")):
+        j -= 1
+    return " ".join(toks[j:])
+
+def unquoted(span):
+    """The path inside a span, quotes removed if present."""
+    if span[:1] in "'\"" and span[-1:] == span[:1] and len(span) >= 2:
+        return span[1:-1]
+    return span
+
+def as_command_path(path):
+    """A path formatted for use inside a hook command string: quoted iff needed."""
+    return f'"{path}"' if " " in path else path
 
 changed = []
 for event, spec in CANON.items():
@@ -91,14 +120,14 @@ for event, spec in CANON.items():
             continue
         for h in g.get("hooks", []):
             if isinstance(h, dict) and isinstance(h.get("command"), str):
-                if owned_path(h["command"], basename) is not None:
+                if owned_span(h["command"], basename) is not None:
                     owned.append((g, h))
 
     if not owned:
         # No openbrain entry for this event → add the canonical one.
         groups.append({"hooks": [{
             "type": "command",
-            "command": want_path,
+            "command": as_command_path(want_path),
             "timeout": spec["timeout"],
             "statusMessage": spec["statusMessage"],
         }]})
@@ -106,12 +135,18 @@ for event, spec in CANON.items():
         continue
 
     # Keep the first owned entry; fix ONLY a stale path prefix, preserving any
-    # env prepend / other tokens. Drop the rest as duplicates.
+    # env prepend / other tokens — and the original quoting style, so a quoted
+    # spaced path stays quoted (and a replacement that needs quotes gets them).
+    # Drop the rest as duplicates.
     keep_group, keep_hook = owned[0]
     cur = keep_hook["command"]
-    cur_path = owned_path(cur, basename)
-    if cur_path != want_path:
-        keep_hook["command"] = cur.replace(cur_path, want_path)
+    cur_span = owned_span(cur, basename)
+    if unquoted(cur_span) != want_path:
+        if cur_span[:1] in "'\"" and cur_span[-1:] == cur_span[:1]:
+            new_span = cur_span[0] + want_path + cur_span[0]
+        else:
+            new_span = as_command_path(want_path)
+        keep_hook["command"] = cur.replace(cur_span, new_span, 1)
         changed.append(f"{event}: path → {want_path}")
 
     if len(owned) > 1:
