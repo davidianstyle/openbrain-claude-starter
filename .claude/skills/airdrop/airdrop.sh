@@ -50,12 +50,16 @@ for f in "$@"; do
   # pwd -P: hand sharingd a physical path — symlinked segments (e.g. /tmp ->
   # /private/tmp) can trip sandbox/permission checks in system services.
   # Directories resolve directly (dirname/basename on '.' or a trailing slash
-  # would yield an unclean '/path/.'-style result).
+  # would yield an unclean '/path/.'-style result). Resolution failures (e.g.
+  # an unsearchable parent dir) abort with a named path, not a silent exit.
   if [ -d "$f" ]; then
-    files+=("$(cd -- "$f" && pwd -P)")
+    resolved="$(cd -- "$f" && pwd -P)" \
+      || { echo "airdrop: cannot resolve directory: $f" >&2; exit 1; }
   else
-    files+=("$(cd -- "$(dirname -- "$f")" && pwd -P)/$(basename -- "$f")")
+    resolved="$(cd -- "$(dirname -- "$f")" && pwd -P)/$(basename -- "$f")" \
+      || { echo "airdrop: cannot resolve path: $f" >&2; exit 1; }
   fi
+  files+=("$resolved")
 done
 
 # A helper orphaned by a previous run holds a ghost window on screen; clear it.
@@ -115,7 +119,7 @@ echo "Opening the AirDrop window (${#files[@]} file(s))..." >&2
 echo "  1. Click the receiving device, then leave the window alone (Cancel aborts; Esc does nothing)." >&2
 echo "  2. Different Apple IDs: answer the Accept prompt on the receiving machine." >&2
 
-result="$(osascript -l JavaScript -e "$JXA" "$KEEPALIVE" "${files[@]}")" \
+result="$(osascript -l JavaScript -e "$JXA" -- "$KEEPALIVE" "${files[@]}")" \
   || { echo "airdrop: osascript helper crashed" >&2; exit 1; }
 
 if [ "$result" = "ENDED" ]; then
