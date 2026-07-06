@@ -258,6 +258,7 @@ Skills live in `.claude/skills/<name>/SKILL.md` (vault-local, portable with the 
 | `/sync-places` | Discovery pass across Google Calendar — finds physical places not yet captured in `+ Atlas/Places/`, stages candidates in `+ Inbox/place-candidates/`. Facet-aware: surfaces when an existing Org should also get a Place note. |
 | `/weekly-review` | Monday synthesis → `+ Atlas/Weekly Reviews/<ISO-week>.md`. |
 | `/asana` | Quick view of tasks due in the next 7 days across configured workspaces, with interactive check-off. |
+| `/airdrop` | Send file(s) to a nearby Apple device via AirDrop — opens the share window pre-loaded, reports the verified outcome (sent/cancelled/failed). macOS only. |
 | `/pull-openbrain-template` | Pull latest changes from the upstream starter, diff against this vault's infrastructure, and interactively apply each change. |
 | `/push-openbrain-template` | Genericize vault improvements and open a PR against the upstream starter — strips personal data, diffs, and creates the GitHub PR after review. |
 

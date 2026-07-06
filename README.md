@@ -124,6 +124,7 @@ Each script is idempotent — safe to re-run.
 | `/push-openbrain-claude-starter` | Genericize vault improvements and open a PR against the template repo |
 | `/pull-openbrain-claude-starter` | Pull latest template changes into the vault interactively |
 | `/asana` | Quick view of upcoming Asana tasks with interactive check-off |
+| `/airdrop` | Send file(s) to a nearby Apple device via AirDrop (macOS only) |
 
 Skills are markdown procedures — Claude reads the SKILL.md and performs the steps. No code execution.
 
