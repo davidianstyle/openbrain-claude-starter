@@ -214,7 +214,7 @@ OpenBrain can auto-commit and push your vault when Claude Code stops, and
 auto-pull when it starts. This keeps your vault in sync across devices
 without manual git commands.
 
-  • SessionStart hook — git pull --rebase (fail-soft)
+  • SessionStart hook — fast-forward-only pull (fail-soft; never rebases)
   • Stop hook — regenerate Home.md MOC index, auto-commit, push
 
 EOF
