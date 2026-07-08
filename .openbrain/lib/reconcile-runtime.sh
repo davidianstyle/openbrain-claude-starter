@@ -142,14 +142,21 @@ if [ "$launcher_drift" = 1 ]; then
   # it gates the copy register-mcps is about to perform — a launcher carrying an
   # inline secret must never reach the runtime locus. Scan the managed SOURCES.
   SCAN="$SRC_LIB/scan-secrets.sh"
-  if [ -f "$SCAN" ]; then
-    if ! bash "$SCAN" "$SRC_LIB"/*-mcp.sh "$SRC_LIB/_common.sh"; then
+  # managed_launchers, not a raw glob: an unmatched glob would hand the scanner
+  # a literal '*-mcp.sh' path. The ${arr[@]+...} expansion guards the empty set
+  # under bash 3.2 + set -u (an empty array reads as unbound there); with zero
+  # managed files there is nothing to scan or deploy-copy, so the scan is
+  # skipped rather than fed nothing.
+  scan_files=()
+  while IFS= read -r f; do scan_files+=("$f"); done < <(managed_launchers "$SRC_LIB")
+  if [ ! -f "$SCAN" ]; then
+    warn "scan-secrets.sh not present — deploy-path secret scan SKIPPED."
+  elif [ "${#scan_files[@]}" -gt 0 ]; then
+    if ! bash "$SCAN" ${scan_files[@]+"${scan_files[@]}"}; then
       warn "deploy ABORTED: a launcher source contains a secret literal (above)."
       warn "Move it to $ENV_FILE and reference it via an env var, then re-run."
       exit 1
     fi
-  else
-    warn "scan-secrets.sh not present — deploy-path secret scan SKIPPED."
   fi
   # register-mcps does launcher copy + scoped registry rewrite + orphan reconcile.
   # It needs .env and the registry file; on a machine without them (no bootstrap

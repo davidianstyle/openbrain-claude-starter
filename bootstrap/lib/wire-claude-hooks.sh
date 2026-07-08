@@ -83,12 +83,22 @@ def owned_span(cmd, basename):
         return None
     end = idx + len(suffix)
     # Quoted path: a closing quote right after the suffix with a matching
-    # opener earlier — return the span including its quotes.
+    # opener earlier — return the span including its quotes. But ONLY if the
+    # quoted content reads as a path: a shell-wrapper string
+    # (sh -c 'cmd && /path/.openbrain/on-start.sh') also puts its closing
+    # quote right after the suffix, and returning that span would fold the
+    # wrapper's whole body into the "path" and destroy it on replacement.
+    # Wrapper-shaped content (first word not path-shaped) falls through to
+    # the left-scan below, which extracts the bare path span from inside the
+    # quoted body and repairs it in place.
     if end < len(cmd) and cmd[end] in "'\"":
         q = cmd[end]
         start = cmd.rfind(q, 0, idx)
         if start != -1:
-            return cmd[start:end + 1]
+            inner = cmd[start + 1:end]
+            first = inner.split(" ")[0] if inner else ""
+            if first.startswith(("/", ".", "~", "$")) or "/" in first:
+                return cmd[start:end + 1]
     # Unquoted: scan from the LEFT, skipping tokens that cannot start the
     # script path — env prepends (NAME=VALUE), wrapper words/flags with no
     # path shape (e.g. 'bash', 'nice', '-n', '10'), and known interpreters/
