@@ -156,6 +156,8 @@ Google services (Gmail, Calendar, Meet, Drive/Docs/Sheets, and Slides) are serve
 
 ### Configured accounts
 
+<!-- openbrain:account-registry -->
+
 {{GOOGLE_ACCOUNTS_TABLE}}
 
 {{SLACK_WORKSPACES_TABLE}}
