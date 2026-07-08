@@ -166,9 +166,11 @@ for k in list(servers.keys()):
     if not isinstance(cmd, str) or not cmd:
         continue
     if k == "fathom" or k.startswith(managed_prefixes):
-        # normpath both sides: lexical differences (double slashes, ./ or ..
-        # segments) must not let a managed entry dodge the guard or vice versa.
-        if os.path.normpath(os.path.dirname(cmd)) == os.path.normpath(lib_dir):
+        # resolve() both sides: lexical differences (double slashes, ./ or ..
+        # segments) AND symlinks (a dotfile-managed ~/.config) must not let a
+        # managed entry dodge the guard or vice versa. resolve() is non-strict,
+        # so entries pointing at already-deleted launchers still compare.
+        if Path(cmd).parent.resolve() == Path(lib_dir).resolve():
             del servers[k]
 
 if plan["has_asana_personal"]:

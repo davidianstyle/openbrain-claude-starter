@@ -55,7 +55,10 @@ step() { printf '\n%s%s%s\n' "$_C_BOLD$_C_BLUE" "$*" "$_C_RESET"; }
 # cannot drift apart between deploy, drift-check, and init.
 managed_launchers() {
   # usage: managed_launchers <src-dir>  — one existing path per line (may be none)
-  local d="$1" f
+  # Empty/missing dir returns nothing rather than letting the glob degrade to
+  # a root-directory scan ("/*-mcp.sh").
+  local d="${1:-}" f
+  [[ -n "$d" && -d "$d" ]] || return 0
   for f in "$d"/*-mcp.sh "$d/_common.sh"; do
     [[ -e "$f" ]] && printf '%s\n' "$f"
   done

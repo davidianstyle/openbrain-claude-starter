@@ -56,12 +56,15 @@ fi
 # hasn't been deployed to the per-machine runtime, the pull's restart-required
 # notice is one-shot — this surfaces it every session until deployed. Fail-soft;
 # never blocks session start, and reads nothing secret (--check is secret-blind).
-if [[ -x "$VAULT/.openbrain/lib/reconcile-runtime.sh" ]]; then
+# -f + explicit bash, not -x + direct exec: a lost executable bit (some
+# filesystems / cross-platform checkouts) would silently skip the drift check
+# — the same silent-failure class it exists to prevent.
+if [[ -f "$VAULT/.openbrain/lib/reconcile-runtime.sh" ]]; then
   # Capture the exit code explicitly — an `elif (( $? == 10 ))` reads whatever
   # ran last and silently swallows unexpected codes (crash, permissions), the
   # same silent-failure class the drift check exists to prevent.
   drift_rc=0
-  drift_out="$("$VAULT/.openbrain/lib/reconcile-runtime.sh" --check 2>/dev/null)" || drift_rc=$?
+  drift_out="$(bash "$VAULT/.openbrain/lib/reconcile-runtime.sh" --check 2>/dev/null)" || drift_rc=$?
   if (( drift_rc == 10 )); then
     log "runtime drift — deployed launchers/hooks are behind the vault:"
     printf '%s\n' "$drift_out" | grep -v '^\[reconcile\]' >&2
