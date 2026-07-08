@@ -159,11 +159,28 @@ cd "$VAULT" && git status && git diff --stat
 
 **Do not commit.** The vault's stop hook handles commits automatically. Just leave the changes as unstaged modifications.
 
+### 6b. Deploy to runtime (make "pulled" == "live")
+
+Most pulled files are live the moment they land (skills, templates, docs run from the repo; git hooks are symlinks). But two categories have their **runtime locus elsewhere** and are NOT live on pull: **MCP launchers** (deployed copies under `~/.config/openbrain/lib/`) and **Claude-hook wiring** (`.claude/settings.json`, generated, gitignored). A pull that touches `.openbrain/lib/*-mcp.sh`, `.openbrain/lib/_common.sh`, or the hook scripts/invocation is *pulled-but-not-live* until deployed.
+
+This is handled by a deterministic, idempotent reconciler — **not** ad-hoc judgement here. It keys on runtime-vs-source drift (independent of this pull's delta), so it also catches drift left by an earlier pull. Skip silently if the script isn't present (pre-feature clone).
+
+```bash
+bash "$VAULT/.openbrain/lib/reconcile-runtime.sh" --check   # exit 0 = in sync, 10 = drift
+```
+
+- **Exit 0:** runtime already matches the vault — say "runtime: in sync" and move on.
+- **Exit 10 (drift):** show the reported drift, then ask the user (one confirm for the batch, not per-file): **Deploy now** / **Defer**.
+  - **Deploy now:** `bash "$VAULT/.openbrain/lib/reconcile-runtime.sh" --apply`. This is the one step that may touch secrets — it delegates the `~/.claude.json` registry rewrite to the trusted `register-mcps.sh` (the pull itself stays secret-blind). It backs up `~/.claude.json` (timestamped, keep-last-good), reconciles orphan launchers (backed up, not deleted), and writes hooks merge-safely. **It cannot restart Claude** — if it prints `RESTART REQUIRED`, relay that verbatim; the deployed launchers/hooks are staged-not-loaded until the user restarts Claude Code.
+  - **Defer:** say so in the report. It re-surfaces every session via `on-start.sh`'s drift check, so it is never silently lost. Do **not** report "runtime current."
+- This step's safe-to-run-anytime exception to the pull's read-only contract is narrow and deliberate: only `--apply`, only after explicit confirm, and only register-mcps reads `.env`.
+
 ### 7. Report
 
 Output to the user:
 
 - **Applied**: list of files changed in the vault, one line each, with a summary of what was pulled in.
+- **Runtime parity** (step 6b): `runtime: in sync`, or `deployed (RESTART REQUIRED)`, or `runtime drift deferred — re-surfaces at next session` — never silently omit when drift existed.
 - **Skipped (personal/placeholder)**: files where the diff was entirely resolved-vs-generic and nothing needed porting.
 - **Skipped (user declined)**: files the user chose to skip.
 - **Vault-ahead (push candidates)**: files where the vault has improvements the template doesn't — suggest running `/push-openbrain-claude-starter` to port them upstream.

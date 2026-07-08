@@ -12,11 +12,16 @@
 # Resolve paths relative to THIS file (bootstrap/lib/common.sh)
 COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$COMMON_DIR/../.." && pwd)"
-CONFIG_DIR="$HOME/.config/openbrain"
-LIB_DIR="$CONFIG_DIR/lib"
-ENV_FILE="$CONFIG_DIR/.env"
-TOKEN_DIR="$CONFIG_DIR/tokens"
-VENV_DIR="$CONFIG_DIR/venv"
+# Runtime locations default to the real per-machine config, but each is
+# overridable via env so the deploy path (register-mcps.sh et al.) can be
+# exercised against a throwaway runtime in tests — NEVER against live config.
+# CLAUDE_JSON is overridable for the same reason (register-mcps mutates it).
+CONFIG_DIR="${OPENBRAIN_CONFIG_DIR:-$HOME/.config/openbrain}"
+LIB_DIR="${OPENBRAIN_LIB_DIR:-$CONFIG_DIR/lib}"
+ENV_FILE="${OPENBRAIN_ENV_FILE:-$CONFIG_DIR/.env}"
+TOKEN_DIR="${OPENBRAIN_TOKEN_DIR:-$CONFIG_DIR/tokens}"
+VENV_DIR="${OPENBRAIN_VENV_DIR:-$CONFIG_DIR/venv}"
+CLAUDE_JSON="${OPENBRAIN_CLAUDE_JSON:-$HOME/.claude.json}"
 DRIVE_TOKEN_ROOT="$HOME/.config/google-docs-mcp"
 
 # ---------- colors + logging ----------
@@ -39,6 +44,26 @@ err()  { printf '%s✗%s %s\n' "$_C_RED" "$_C_RESET" "$*" >&2; }
 die()  { err "$@"; exit 1; }
 
 step() { printf '\n%s%s%s\n' "$_C_BOLD$_C_BLUE" "$*" "$_C_RESET"; }
+
+# ---------- managed launcher set ----------
+# The SINGLE definition of which .openbrain/lib files are runtime launchers
+# (deployed to $LIB_DIR): the *-mcp.sh launchers plus the _common.sh they
+# source. Everything else in .openbrain/lib (clone-pii-gate.sh, scan-secrets.sh,
+# reconcile-runtime.sh, ...) is vault/clone-tier tooling that runs from the
+# repo, not the per-machine runtime. minimal-init.sh, register-mcps.sh, and
+# reconcile-runtime.sh all iterate this helper — keep them on it so the set
+# cannot drift apart between deploy, drift-check, and init.
+managed_launchers() {
+  # usage: managed_launchers <src-dir>  — one existing path per line (may be none)
+  # Empty/missing dir returns nothing rather than letting the glob degrade to
+  # a root-directory scan ("/*-mcp.sh").
+  local d="${1:-}" f
+  [[ -n "$d" && -d "$d" ]] || return 0
+  for f in "$d"/*-mcp.sh "$d/_common.sh"; do
+    [[ -e "$f" ]] && printf '%s\n' "$f"
+  done
+  return 0
+}
 
 prompt() {
   # prompt "label" [default]
