@@ -28,18 +28,17 @@ load_env
 # -----------------------------------------------------------------------------
 mkdir -p "$LIB_DIR"
 chmod 755 "$LIB_DIR"
-# Deploy ONLY the runtime launcher set: the *-mcp.sh launchers plus the
-# _common.sh they source. Other .openbrain/lib/*.sh (clone-pii-gate.sh,
-# rebuild-next.sh) are clone-tier tooling that runs from the repo, not the
-# per-machine runtime — don't pollute LIB_DIR with them.
-for f in "$REPO_ROOT/.openbrain/lib/"*-mcp.sh "$REPO_ROOT/.openbrain/lib/_common.sh"; do
-  [[ -e "$f" ]] || continue
+# Deploy ONLY the runtime launcher set (managed_launchers in common.sh is the
+# single definition — *-mcp.sh + _common.sh). Other .openbrain/lib/*.sh
+# (clone-pii-gate.sh, rebuild-next.sh) are clone-tier tooling that runs from
+# the repo, not the per-machine runtime — don't pollute LIB_DIR with them.
+while IFS= read -r f; do
   dest="$LIB_DIR/$(basename "$f")"
   if ! cmp -s "$f" "$dest" 2>/dev/null; then
     cp "$f" "$dest"
     chmod 755 "$dest"
   fi
-done
+done < <(managed_launchers "$REPO_ROOT/.openbrain/lib")
 ok "launcher scripts installed at $LIB_DIR"
 
 # -----------------------------------------------------------------------------

@@ -176,14 +176,20 @@ for event, spec in CANON.items():
         hooks[event] = [g for g in groups if not (isinstance(g, dict) and g.get("hooks") == [])]
         changed.append(f"{event}: deduped {len(owned)-1} stale")
 
-# Atomic + validated write.
-payload = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-json.loads(payload)  # must parse before we commit it
-tmp = settings_path.with_name(settings_path.name + ".openbrain-tmp")
-tmp.write_text(payload, encoding="utf-8")
-os.replace(tmp, settings_path)
-
+# Atomic + validated write — ONLY when something semantically changed. The
+# no-change path must not touch the file at all: an unconditional write
+# reserializes to json.dumps(..., indent=2, ensure_ascii=False) + "\n", so any
+# file an external writer formatted differently (legacy \uXXXX escapes from an
+# ensure_ascii dump, another tool's indent/ordering, hand edits) would be
+# rewritten here — and the runtime reconciler, which detects hook drift by
+# running this wirer on a COPY and byte-comparing, would read that pure
+# formatting delta as drift on every run and "converge" it forever.
 if changed:
+    payload = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    json.loads(payload)  # must parse before we commit it
+    tmp = settings_path.with_name(settings_path.name + ".openbrain-tmp")
+    tmp.write_text(payload, encoding="utf-8")
+    os.replace(tmp, settings_path)
     print("[wire-claude-hooks] " + "; ".join(changed))
 else:
     print("[wire-claude-hooks] hooks already correct (no change)")

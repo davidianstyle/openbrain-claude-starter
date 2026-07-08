@@ -33,6 +33,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VAULT="$(cd "$HERE/../.." && pwd)"          # .openbrain/lib → vault root
 SRC_LIB="$VAULT/.openbrain/lib"
 
+# Sourced ONLY for managed_launchers() — the single definition of the deployed
+# launcher set, shared with register-mcps.sh and minimal-init.sh. Side-effect
+# free: it computes paths and defines helpers, never reads .env (secret-blind
+# contract intact). Our own log/warn below override its versions.
+# shellcheck source=../../bootstrap/lib/common.sh
+source "$VAULT/bootstrap/lib/common.sh"
+
 # Runtime targets — same override scheme as bootstrap/lib/common.sh.
 CONFIG_DIR="${OPENBRAIN_CONFIG_DIR:-$HOME/.config/openbrain}"
 LIB_DIR="${OPENBRAIN_LIB_DIR:-$CONFIG_DIR/lib}"
@@ -50,17 +57,15 @@ findings=""
 launcher_drift=0
 hook_drift=0
 
-# Launchers: changed or missing (managed set only: *-mcp.sh + _common.sh).
-shopt -s nullglob
-for f in "$SRC_LIB"/*-mcp.sh "$SRC_LIB/_common.sh"; do
-  [ -e "$f" ] || continue
+# Launchers: changed or missing (managed_launchers in common.sh is the single
+# definition of the set: *-mcp.sh + _common.sh).
+while IFS= read -r f; do
   dest="$LIB_DIR/$(basename "$f")"
   if ! cmp -s "$f" "$dest" 2>/dev/null; then
     findings="${findings}  launcher: $(basename "$f") (changed or missing in runtime)"$'\n'
     launcher_drift=1
   fi
-done
-shopt -u nullglob
+done < <(managed_launchers "$SRC_LIB")
 # Launchers: orphaned (managed *-mcp.sh in runtime with no tracked source).
 shopt -s nullglob
 for dest in "$LIB_DIR"/*-mcp.sh; do
@@ -73,7 +78,17 @@ shopt -u nullglob
 
 # Hook wiring: reuse wire-claude-hooks on a COPY and see if it would change
 # anything. No bespoke check logic to drift out of sync with the wirer, and
-# touches no secrets.
+# touches no secrets. The wirer writes only on a semantic change, so a pure
+# formatting difference (another tool's serialization, legacy \uXXXX escapes)
+# never reads as drift here.
+#
+# DELIBERATE EXCLUSION: canonical timeout/statusMessage bumps never flag as
+# drift and never propagate to existing installs. The wirer applies CANON
+# values only when CREATING a missing entry — on an existing entry a
+# user-tuned value is indistinguishable from a stale canonical one, so
+# "pulled == live" covers the script path, entry presence, and dedup, NOT
+# those two fields. Changing them for existing installs is a hands-on
+# migration, not a reconcile.
 tmpdir="$(mktemp -d)"; trap 'rm -rf "$tmpdir"' EXIT
 if [ -f "$SETTINGS_FILE" ]; then
   cp "$SETTINGS_FILE" "$tmpdir/settings.json"
@@ -123,6 +138,19 @@ fi
 restart=0
 
 if [ "$launcher_drift" = 1 ]; then
+  # DP3: reconcile is otherwise secret-blind. This is the one content check, and
+  # it gates the copy register-mcps is about to perform — a launcher carrying an
+  # inline secret must never reach the runtime locus. Scan the managed SOURCES.
+  SCAN="$SRC_LIB/scan-secrets.sh"
+  if [ -f "$SCAN" ]; then
+    if ! bash "$SCAN" "$SRC_LIB"/*-mcp.sh "$SRC_LIB/_common.sh"; then
+      warn "deploy ABORTED: a launcher source contains a secret literal (above)."
+      warn "Move it to $ENV_FILE and reference it via an env var, then re-run."
+      exit 1
+    fi
+  else
+    warn "scan-secrets.sh not present — deploy-path secret scan SKIPPED."
+  fi
   # register-mcps does launcher copy + scoped registry rewrite + orphan reconcile.
   # It needs .env and the registry file; on a machine without them (no bootstrap
   # yet) skip with a warning rather than hard-failing the pull.

@@ -45,6 +45,23 @@ die()  { err "$@"; exit 1; }
 
 step() { printf '\n%s%s%s\n' "$_C_BOLD$_C_BLUE" "$*" "$_C_RESET"; }
 
+# ---------- managed launcher set ----------
+# The SINGLE definition of which .openbrain/lib files are runtime launchers
+# (deployed to $LIB_DIR): the *-mcp.sh launchers plus the _common.sh they
+# source. Everything else in .openbrain/lib (clone-pii-gate.sh, scan-secrets.sh,
+# reconcile-runtime.sh, ...) is vault/clone-tier tooling that runs from the
+# repo, not the per-machine runtime. minimal-init.sh, register-mcps.sh, and
+# reconcile-runtime.sh all iterate this helper — keep them on it so the set
+# cannot drift apart between deploy, drift-check, and init.
+managed_launchers() {
+  # usage: managed_launchers <src-dir>  — one existing path per line (may be none)
+  local d="$1" f
+  for f in "$d"/*-mcp.sh "$d/_common.sh"; do
+    [[ -e "$f" ]] && printf '%s\n' "$f"
+  done
+  return 0
+}
+
 prompt() {
   # prompt "label" [default]
   local label="$1" default="${2:-}" answer=''
