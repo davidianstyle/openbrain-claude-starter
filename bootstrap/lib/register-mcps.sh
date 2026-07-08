@@ -158,6 +158,7 @@ def stdio(name, script, *args):
 # (e.g. ~/openbrain-tools/...). The prefix list only narrows which keys we even
 # consider, so a foreign server outside lib_dir is always safe.
 managed_prefixes = ("asana_", "gmail_", "gcal_", "gmeet_", "gdrive_", "gslides_", "google_", "slack_")
+resolved_lib_dir = Path(lib_dir).resolve()  # constant across the loop; resolve() stats the filesystem
 for k in list(servers.keys()):
     v = servers[k]
     cmd = v.get("command") if isinstance(v, dict) else ""
@@ -176,7 +177,7 @@ for k in list(servers.keys()):
         # lib_dir when the script happens to run from there — a launcher we
         # manage always has an absolute path, so anything else is never ours.
         cmd_path = Path(cmd)
-        if cmd_path.is_absolute() and cmd_path.parent.resolve() == Path(lib_dir).resolve():
+        if cmd_path.is_absolute() and cmd_path.parent.resolve() == resolved_lib_dir:
             del servers[k]
 
 if plan["has_asana_personal"]:
