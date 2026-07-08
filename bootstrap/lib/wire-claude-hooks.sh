@@ -113,7 +113,16 @@ def owned_span(cmd, basename):
     # or '/' ('My .secret/…') and would truncate the span.
     WRAPPERS = ("env", "bash", "sh", "zsh", "dash", "python", "python3", "node", "nice")
     toks = cmd[:end].split(" ")
+    # A standalone shell-operator token ('&&', ';', ...) means everything
+    # before it is wrapper territory, never a fragment of the script path (no
+    # real path fragment is a lone '&&'): resume the scan just after the LAST
+    # operator, so path-shaped prefix commands ('./bin/prepare && …') can't
+    # be mistaken for the span while spaced-path fragments stay intact.
+    OPERATORS = {"&&", "||", ";", "|", "&"}
     i = 0
+    for j, t in enumerate(toks[:-1]):
+        if t in OPERATORS:
+            i = j + 1
     while i < len(toks) - 1:
         t = toks[i]
         if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t):
