@@ -31,7 +31,7 @@ SETTINGS_FILE="${2:-$WCH_REPO_ROOT/.claude/settings.json}"
 mkdir -p "$(dirname "$SETTINGS_FILE")"
 
 "$PYTHON_BIN" - "$SETTINGS_FILE" "$WCH_REPO_ROOT" <<'PY'
-import json, os, re, sys
+import json, os, re, shlex, sys
 from pathlib import Path
 
 # resolve() so a symlinked settings.json (dotfiles managers) keeps its link:
@@ -152,8 +152,12 @@ def unquoted(span):
     return span
 
 def as_command_path(path):
-    """A path formatted for use inside a hook command string: quoted iff needed."""
-    return f'"{path}"' if " " in path else path
+    """A path formatted for use inside a hook command string: quoted iff
+    needed. shlex.quote, not a space test — any shell metacharacter in the
+    path ('&', ';', '(', …) breaks or backgrounds the unquoted command, and
+    double-quoting would still expand a '$'. Single-quoting only when needed
+    keeps existing unquoted commands byte-stable (no spurious rewrites)."""
+    return shlex.quote(path)
 
 changed = []
 for event, spec in CANON.items():
