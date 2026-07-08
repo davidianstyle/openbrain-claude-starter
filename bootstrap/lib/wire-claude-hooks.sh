@@ -71,54 +71,25 @@ hooks = data.setdefault("hooks", {})
 if not isinstance(hooks, dict):
     raise SystemExit("[wire-claude-hooks] .hooks is not an object; refusing to edit")
 
-def owned_span(cmd, basename):
-    """Return the exact substring of cmd that is the openbrain script path
-    (ending in /.openbrain/<basename>), including surrounding quotes if any,
-    or None. Handles env prepends ('ENV=x /abs/…'), quoted paths, and
-    unquoted paths containing spaces — token-splitting would return only the
-    last fragment of a spaced path and corrupt the command on replacement."""
-    suffix = "/.openbrain/" + basename
-    idx = cmd.find(suffix)
-    if idx == -1:
-        return None
-    end = idx + len(suffix)
-    # Quoted path: a closing quote right after the suffix with a matching
-    # opener earlier — return the span including its quotes. But ONLY if the
-    # quoted content reads as a path: a shell-wrapper string
-    # (sh -c 'cmd && /path/.openbrain/on-start.sh') also puts its closing
-    # quote right after the suffix, and returning that span would fold the
-    # wrapper's whole body into the "path" and destroy it on replacement.
-    # Wrapper-shaped content (first word not path-shaped) falls through to
-    # the left-scan below, which extracts the bare path span from inside the
-    # quoted body and repairs it in place.
-    if end < len(cmd) and cmd[end] in "'\"":
-        q = cmd[end]
-        start = cmd.rfind(q, 0, idx)
-        if start != -1:
-            inner = cmd[start + 1:end]
-            first = inner.split(" ")[0] if inner else ""
-            if first.startswith(("/", ".", "~", "$")) or "/" in first:
-                return cmd[start:end + 1]
-    # Unquoted: scan from the LEFT, skipping tokens that cannot start the
-    # script path — env prepends (NAME=VALUE), wrapper words/flags with no
-    # path shape (e.g. 'bash', 'nice', '-n', '10'), and known interpreters/
-    # wrappers given as ABSOLUTE paths ('/bin/bash', '/usr/bin/env'): those
-    # contain '/' but are not the script path's first fragment, and treating
-    # them as it would fold the wrapper into the span and destroy it on
-    # replacement. The basename allowlist keeps this bounded — an unlisted
-    # abs-path wrapper still breaks the scan early (rare; documented trade).
-    # Everything from the first path-shaped token through the suffix is the
-    # span. A backward scan keyed on token prefixes is ambiguous here: an
-    # interior fragment of a spaced path may itself start with '.', '~', '$'
-    # or '/' ('My .secret/…') and would truncate the span.
+def scan_left(s):
+    """The trailing span of s that is the script path: scan from the LEFT,
+    skipping tokens that cannot start it — env prepends (NAME=VALUE), wrapper
+    words/flags with no path shape ('bash', 'nice', '-n', '10'), and known
+    interpreters/wrappers given as ABSOLUTE paths ('/bin/bash',
+    '/usr/bin/env'): those contain '/' but are not the path's first fragment,
+    and treating them as it would fold the wrapper into the span and destroy
+    it on replacement (basename allowlist keeps this bounded — an unlisted
+    abs-path wrapper still breaks the scan early; documented trade). A
+    standalone shell-operator token ('&&', '||', ';', '|', '&') can never be
+    a fragment of the script path, so the scan resumes after the LAST one:
+    path-shaped prefix commands ('./bin/prepare && …') are structurally
+    excluded while spaced-path fragments stay intact. A backward scan keyed
+    on token prefixes is ambiguous here: an interior fragment of a spaced
+    path may itself start with '.', '~', '$' or '/' ('My .secret/…') and
+    would truncate the span."""
     WRAPPERS = ("env", "bash", "sh", "zsh", "dash", "python", "python3", "node", "nice")
-    toks = cmd[:end].split(" ")
-    # A standalone shell-operator token ('&&', ';', ...) means everything
-    # before it is wrapper territory, never a fragment of the script path (no
-    # real path fragment is a lone '&&'): resume the scan just after the LAST
-    # operator, so path-shaped prefix commands ('./bin/prepare && …') can't
-    # be mistaken for the span while spaced-path fragments stay intact.
     OPERATORS = {"&&", "||", ";", "|", "&"}
+    toks = s.split(" ")
     i = 0
     for j, t in enumerate(toks[:-1]):
         if t in OPERATORS:
@@ -136,6 +107,37 @@ def owned_span(cmd, basename):
             continue
         break
     return " ".join(toks[i:])
+
+def owned_span(cmd, basename):
+    """Return the exact substring of cmd that is the openbrain script path
+    (ending in /.openbrain/<basename>), including surrounding quotes if any,
+    or None. Handles env prepends ('ENV=x /abs/…'), quoted paths, and
+    unquoted paths containing spaces — token-splitting would return only the
+    last fragment of a spaced path and corrupt the command on replacement."""
+    suffix = "/.openbrain/" + basename
+    idx = cmd.find(suffix)
+    if idx == -1:
+        return None
+    end = idx + len(suffix)
+    # Quoted path: a closing quote right after the suffix with a matching
+    # opener earlier — return the span including its quotes. But ONLY if the
+    # quoted content reads as ONE path: a shell-wrapper string
+    # (sh -c 'cmd && /path/.openbrain/on-start.sh') also puts its closing
+    # quote right after the suffix, and returning that span would fold the
+    # wrapper's whole body into the "path" and destroy it on replacement.
+    # "Reads as one path" = scanning the inner content consumes nothing —
+    # a first-word shape test isn't enough, since a compound body can itself
+    # start path-shaped ('sh -c \\'./prepare.sh && /path/…\\''). Anything else
+    # falls through to the left-scan, which extracts the bare path span from
+    # inside the quoted body and repairs it in place.
+    if end < len(cmd) and cmd[end] in "'\"":
+        q = cmd[end]
+        start = cmd.rfind(q, 0, idx)
+        if start != -1:
+            inner = cmd[start + 1:end]
+            if inner and scan_left(inner) == inner:
+                return cmd[start:end + 1]
+    return scan_left(cmd[:end])
 
 def unquoted(span):
     """The path inside a span, quotes removed if present."""
