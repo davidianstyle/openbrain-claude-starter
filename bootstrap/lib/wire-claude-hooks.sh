@@ -112,7 +112,16 @@ def scan_left(s):
             i += 1  # wrapper word or flag (no path shape)
             continue
         break
-    return " ".join(toks[i:])
+    res = " ".join(toks[i:])
+    # A wrapper string whose closing quote sits BEYOND the suffix
+    # (sh -c '/path/.openbrain/on-start.sh && rest') glues its opening quote
+    # to the span's first token. An unmatched quote is never part of the
+    # path: keeping it makes the span compare stale against want_path forever
+    # (unquoted() can't strip a lone quote) and replacement then deletes the
+    # wrapper's opening quote, leaving an unbalanced command.
+    if res[:1] in "'\"" and not res.endswith(res[0]):
+        res = res[1:]
+    return res
 
 def owned_span(cmd, basename):
     """Return the exact substring of cmd that is the openbrain script path

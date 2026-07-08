@@ -35,6 +35,7 @@ chmod 755 "$LIB_DIR"
 while IFS= read -r f; do
   dest="$LIB_DIR/$(basename "$f")"
   if ! cmp -s "$f" "$dest" 2>/dev/null; then
+    rm -f "$dest"        # replace a stale file or dev symlink, don't write through it
     cp "$f" "$dest"
     chmod 755 "$dest"
   fi
