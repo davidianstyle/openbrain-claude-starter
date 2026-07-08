@@ -96,7 +96,13 @@ def scan_left(s):
             i = j + 1
     while i < len(toks) - 1:
         t = toks[i]
-        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t):
+        # Optional leading quote: when scanning a full command whose wrapper
+        # string starts with an env assignment (sh -c 'FOO=x /path/…'), the
+        # opening quote is glued to the first token ('FOO=x) — without the
+        # allowance it reads as path-shaped ("/" in the value) and the break
+        # here would fold the prepend AND the quote into the span, leaving a
+        # syntactically-broken command after replacement.
+        if re.match(r"^['\"]?[A-Za-z_][A-Za-z0-9_]*=", t):
             i += 1  # env-assignment prepend
             continue
         if "/" in t and t.rsplit("/", 1)[-1] in WRAPPERS:
