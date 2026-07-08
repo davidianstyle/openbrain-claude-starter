@@ -170,7 +170,12 @@ for k in list(servers.keys()):
         # segments) AND symlinks (a dotfile-managed ~/.config) must not let a
         # managed entry dodge the guard or vice versa. resolve() is non-strict,
         # so entries pointing at already-deleted launchers still compare.
-        if Path(cmd).parent.resolve() == Path(lib_dir).resolve():
+        # Absolute commands only: a bare/relative command ("node") has
+        # Path(cmd).parent == ".", which resolves to the CWD and would match
+        # lib_dir when the script happens to run from there — a launcher we
+        # manage always has an absolute path, so anything else is never ours.
+        cmd_path = Path(cmd)
+        if cmd_path.is_absolute() and cmd_path.parent.resolve() == Path(lib_dir).resolve():
             del servers[k]
 
 if plan["has_asana_personal"]:
