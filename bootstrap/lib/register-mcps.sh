@@ -160,8 +160,11 @@ managed_prefixes = ("asana_", "gmail_", "gcal_", "gmeet_", "gdrive_", "gslides_"
 for k in list(servers.keys()):
     v = servers[k]
     cmd = v.get("command") if isinstance(v, dict) else ""
-    if not isinstance(cmd, str):
-        cmd = ""  # explicit null / non-string command is never ours
+    # Explicit null / empty / non-string command is never ours — and an empty
+    # cmd must not reach the normpath guard below: dirname("") → "." equals an
+    # empty/degenerate lib_dir and would delete a foreign entry.
+    if not isinstance(cmd, str) or not cmd:
+        continue
     if k == "fathom" or k.startswith(managed_prefixes):
         # normpath both sides: lexical differences (double slashes, ./ or ..
         # segments) must not let a managed entry dodge the guard or vice versa.

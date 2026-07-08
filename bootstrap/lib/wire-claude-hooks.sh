@@ -90,18 +90,27 @@ def owned_span(cmd, basename):
         if start != -1:
             return cmd[start:end + 1]
     # Unquoted: scan from the LEFT, skipping tokens that cannot start the
-    # script path — env prepends (NAME=VALUE) and wrapper words/flags with no
-    # path shape (e.g. 'bash', 'nice', '-n', '10'). Everything from the first
-    # path-shaped token through the suffix is the span. A backward scan keyed
-    # on token prefixes is ambiguous here: an interior fragment of a spaced
-    # path may itself start with '.', '~', '$' or '/' ('My .secret/…') and
-    # would truncate the span.
+    # script path — env prepends (NAME=VALUE), wrapper words/flags with no
+    # path shape (e.g. 'bash', 'nice', '-n', '10'), and known interpreters/
+    # wrappers given as ABSOLUTE paths ('/bin/bash', '/usr/bin/env'): those
+    # contain '/' but are not the script path's first fragment, and treating
+    # them as it would fold the wrapper into the span and destroy it on
+    # replacement. The basename allowlist keeps this bounded — an unlisted
+    # abs-path wrapper still breaks the scan early (rare; documented trade).
+    # Everything from the first path-shaped token through the suffix is the
+    # span. A backward scan keyed on token prefixes is ambiguous here: an
+    # interior fragment of a spaced path may itself start with '.', '~', '$'
+    # or '/' ('My .secret/…') and would truncate the span.
+    WRAPPERS = ("env", "bash", "sh", "zsh", "dash", "python", "python3", "node", "nice")
     toks = cmd[:end].split(" ")
     i = 0
     while i < len(toks) - 1:
         t = toks[i]
         if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t):
             i += 1  # env-assignment prepend
+            continue
+        if "/" in t and t.rsplit("/", 1)[-1] in WRAPPERS:
+            i += 1  # known interpreter/wrapper by absolute path
             continue
         if "/" not in t and not t.startswith(("~", "$", ".")):
             i += 1  # wrapper word or flag (no path shape)
