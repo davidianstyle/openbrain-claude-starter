@@ -10,6 +10,13 @@ cd "$VAULT" || exit 0
 
 log() { printf '[on-start] %s\n' "$*" >&2; }
 
+# Warnings go to STDOUT, not stderr. Empirically verified (2026-07-08): a
+# SessionStart hook's stdout is injected into the model's context, while
+# stderr with exit 0 is invisible to both the model and the operator — a
+# warning on stderr is structurally silent. Routine progress notes stay on
+# stderr (log); anything that must change the session's behavior uses warn.
+warn() { printf '[on-start] %s\n' "$*"; }
+
 # First error:/fatal: line of a git transcript, else its last line — the last
 # line of a multi-line git error is often a fragment ("and the repository
 # exists.") or progress noise ("Updating abc123..def456"). Single POSIX awk
@@ -61,13 +68,13 @@ if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
   elif merge_out="$(git merge --ff-only '@{u}' 2>&1)"; then
     : # already up to date, or clean fast-forward
   else
-    log "!! PULL SKIPPED — cannot fast-forward from the remote."
-    log "!! $(err_line "$merge_out")"
-    log "!! Local and remote histories have diverged (or incoming changes"
-    log "!! overlap uncommitted edits). Nothing was rebased, stashed, or"
-    log "!! modified — your notes are exactly as you left them."
-    log "!! Reconcile interactively when convenient: commit or stash local"
-    log "!! edits, then run: git pull --rebase"
+    warn "!! PULL SKIPPED — cannot fast-forward from the remote."
+    warn "!! $(err_line "$merge_out")"
+    warn "!! Local and remote histories have diverged (or incoming changes"
+    warn "!! overlap uncommitted edits). Nothing was rebased, stashed, or"
+    warn "!! modified — your notes are exactly as you left them."
+    warn "!! Reconcile interactively when convenient: commit or stash local"
+    warn "!! edits, then run: git pull --rebase"
   fi
 else
   log "no upstream configured, skipping pull"
@@ -83,10 +90,10 @@ if [[ -x "$VAULT/bootstrap/lib/refresh-google-tokens.sh" && -d "$HOME/.config/op
     # Google auth settings changed — surface the friendly reconnect nudge
     # verbatim (regardless of probe exit code) so the operator is offered a
     # reconnect rather than hitting silent failures mid-session.
-    log "Google auth settings changed — offer to reconnect (ask first, let the operator pick which accounts):"
+    warn "Google auth settings changed — offer to reconnect (ask first, let the operator pick which accounts):"
     printf '%s\n' "$refresh_out" \
       | sed -n '/OPENBRAIN_AUTH_NUDGE_BEGIN/,/OPENBRAIN_AUTH_NUDGE_END/p' \
-      | grep -vE 'OPENBRAIN_AUTH_NUDGE_(BEGIN|END)' >&2
+      | grep -vE 'OPENBRAIN_AUTH_NUDGE_(BEGIN|END)'
   elif (( refresh_rc != 0 )); then
     log "google token refresh: $(printf '%s' "$refresh_out" | tail -3 | tr '\n' ' ')"
   fi
@@ -104,14 +111,24 @@ if [[ -f "$VAULT/.openbrain/lib/reconcile-runtime.sh" ]]; then
   # ran last and silently swallows unexpected codes (crash, permissions), the
   # same silent-failure class the drift check exists to prevent.
   drift_rc=0
-  drift_out="$(bash "$VAULT/.openbrain/lib/reconcile-runtime.sh" --check 2>/dev/null)" || drift_rc=$?
+  # 2>&1, not 2>/dev/null: --check is secret-blind by contract, so capturing
+  # stderr is safe — and on the crash path below it is the only diagnostic
+  # (discarding it would make CANNOT-CHECK loud but uninformative).
+  drift_out="$(bash "$VAULT/.openbrain/lib/reconcile-runtime.sh" --check 2>&1)" || drift_rc=$?
   if (( drift_rc == 10 )); then
-    log "runtime drift — deployed launchers/hooks are behind the vault:"
-    printf '%s\n' "$drift_out" | grep -v '^\[reconcile\]' >&2
-    log "deploy with: bash .openbrain/lib/reconcile-runtime.sh --apply"
+    warn "runtime drift — deployed launchers/hooks are behind the vault:"
+    printf '%s\n' "$drift_out" | grep -v '^\[reconcile\]'
+    warn "deploy with: bash .openbrain/lib/reconcile-runtime.sh --apply"
   elif (( drift_rc != 0 )); then
-    log "runtime drift check FAILED (exit $drift_rc) — run manually: bash .openbrain/lib/reconcile-runtime.sh --check"
+    warn "runtime drift check FAILED (exit $drift_rc) — run manually: bash .openbrain/lib/reconcile-runtime.sh --check"
+    printf '%s\n' "$drift_out"
   fi
+else
+  # A checker's absence is itself a finding: silence here would read as
+  # "runtime in sync" when the truth is "drift not checked". On a machine
+  # that has never deployed the reconciler this is a standing (accurate)
+  # notice that the check isn't running — not an error.
+  warn "MISSING: .openbrain/lib/reconcile-runtime.sh — runtime drift NOT checked this session"
 fi
 
 exit 0

@@ -138,6 +138,11 @@ When a template in `+ Extras/Templates/` gains or removes a required frontmatter
   - **Stop hook** (`.openbrain/on-stop.sh`) — regenerates Home.md MOC index, then smart-commits all changes and pushes (skip-if-clean, pull-rebase first, conflict → inbox note). To keep commits local-only, prepend `OPENBRAIN_AUTOPUSH=0` to the hook's command in `.claude/settings.json` (e.g. `"command": "OPENBRAIN_AUTOPUSH=0 /path/to/.openbrain/on-stop.sh"`) — useful when `origin` is a repo that must not receive vault content, such as a public template fork.
   - These hooks are **not enabled by default**. Enable them during `./bootstrap/setup.sh` or by adding the hooks section to `.claude/settings.json` manually.
 
+### Checker norms
+
+- **Checkers report three outcomes, never two.** Every check distinguishes CLEAN (evidence compared, matched), FINDINGS, and CANNOT-CHECK (loud, distinct exit code and report line). Concretely: (1) never wrap evidence-gathering commands in `2>/dev/null || true` — capture the rc and map failure to CANNOT-CHECK; (2) every scan over an enumerated set states its count and treats zero as CANNOT-CHECK unless zero is proven expected; (3) a checker's absence is itself a finding — no bare `[[ -x ]] &&` call sites; (4) reports state coverage, not just findings ("N seen, M monitored, K skipped"); (5) a proxy signal (anchor tag, marker, log line) is re-verified against the truth it stands for at every point that writes it; (6) every detection fixture includes the false-negative direction — break the input and assert the checker screams — and harnesses test the live bytes, not copies.
+- **No load-bearing inference over free-form input.** When a checker needs ground truth, make the truth declarable — a marker line, a claims block, a recorded span — and have the checker consume that, never a "better inference" over free-form content. A checker that keeps growing parsing edge-cases is the signal to move the truth into a declared form, not to improve the parser.
+
 ### Vault scaling and archive policy
 
 Daily notes, interactions, and people candidates grow linearly. To keep the vault efficient for both Claude (grep/read) and Obsidian (graph, search):
