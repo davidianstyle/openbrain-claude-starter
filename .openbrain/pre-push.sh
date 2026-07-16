@@ -32,6 +32,16 @@ if [[ -f "$VAULT/.openbrain/protected-remotes" ]]; then
     [[ -z "$line" || "$line" == \#* ]] && continue
     patterns+=("$line")
   done < "$VAULT/.openbrain/protected-remotes"
+  # A protected-remotes file that yields ZERO patterns (empty, or comments
+  # only) is almost certainly a mistake, and silently running unprotected is
+  # the worst reading of it. Warn and fall back to the default pattern —
+  # the same behavior a missing file gets. (Deleting the installed hook is
+  # not a durable disable — on-start.sh relinks it; deliberate overrides are
+  # a never-matching pattern entry, or git push --no-verify per push.)
+  if [[ ${#patterns[@]} -eq 0 ]]; then
+    echo "pre-push WARNING: $VAULT/.openbrain/protected-remotes exists but contains no patterns — falling back to the default ('*openbrain-claude-starter*'). The guard is NOT disabled by an empty file; to run intentionally unprotected, list a never-matching pattern (e.g. 'match-nothing-on-purpose'), or use git push --no-verify per push." >&2
+    patterns=("*openbrain-claude-starter*")
+  fi
 else
   patterns=("*openbrain-claude-starter*")
 fi
