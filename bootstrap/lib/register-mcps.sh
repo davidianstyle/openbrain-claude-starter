@@ -231,6 +231,22 @@ for dest in "$LIB_DIR"/*-mcp.sh; do
   fi
 done
 shopt -u nullglob
+# -----------------------------------------------------------------------------
+# Flag CLAUDE.md account-registry drift (guarded with || true; never blocks the
+# bootstrap flow). register-mcps is the chokepoint every account add/remove
+# funnels through, so it's where a mismatch between the live registry and the
+# hand-curated routing listing surfaces. The checker locates the registry block
+# by its explicit marker (<!-- openbrain:account-registry -->) and exits loud —
+# never silent-clean — when the marker is absent. No-op if the script isn't
+# present.
+# -----------------------------------------------------------------------------
+# -f + explicit bash, not -x + direct exec: a lost executable bit (ZIP
+# extraction, some shared mounts) would silently skip the check — the same
+# silent-failure class it exists to prevent.
+if [[ -f "$HERE/check-registry-drift.sh" ]]; then
+  step "Checking CLAUDE.md account registry for drift"
+  bash "$HERE/check-registry-drift.sh" || true
+fi
 
 step "Done registering MCPs"
 info "Restart Claude Code so it picks up the new mcpServers entries"
