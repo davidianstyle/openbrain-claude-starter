@@ -167,7 +167,11 @@ Google services (Gmail, Calendar, Meet, Drive/Docs/Sheets, and Slides) are serve
 
 {{SLACK_WORKSPACES_TABLE}}
 
+{{ASANA_WORKSPACES_TABLE}}
+
 {{FATHOM_TABLE}}
+
+<!-- openbrain:account-registry:end -->
 
 ### Slug convention
 

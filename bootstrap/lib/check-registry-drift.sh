@@ -3,16 +3,25 @@
 # registry claims.
 #
 # Contract (declared, not inferred): the registry block in CLAUDE.md is the
-# region between the explicit marker line
+# region between a PAIR of explicit marker lines
 #
 #     <!-- openbrain:account-registry -->
+#     ...the configured-accounts listing...
+#     <!-- openbrain:account-registry:end -->
 #
-# and the next markdown heading (or EOF). The script locates the block by
-# grepping for that marker ONLY — it never guesses section headings, numbering,
-# or table style. A vault opts in by placing the marker directly above its
-# configured-accounts listing (bullets or tables both parse). No marker means
-# nothing is checked, and the script says so LOUDLY and exits non-clean —
-# never silent-clean.
+# The script locates the block by grepping for those two markers ONLY — it never
+# guesses section headings, numbering, or table style. A vault opts in by
+# bracketing its configured-accounts listing (bullets or tables both parse).
+# Either marker missing means nothing is checked, and the script says so LOUDLY
+# and exits non-clean — never silent-clean.
+#
+# Paired, not "marker to the next heading": a populated registry groups accounts
+# under per-service sub-headings (#### Google / #### Slack / ...), so a
+# heading-terminated block collapses to empty on exactly the vaults that have
+# something to check — the marker cannot sit anywhere that both follows the
+# section title and precedes a sub-heading. An end marker is the same
+# make-the-truth-declarable move the BEGIN/END auth-nudge bracket already uses
+# (see bootstrap/README.md), and it is why this checker parses no headings at all.
 #
 # The registry block is hand-curated (roles/status/sunset notes cannot be
 # machine-derived), so this script does NOT rewrite CLAUDE.md. It only detects
@@ -27,8 +36,9 @@
 # Exit codes (callers in bootstrap flows guard with `|| true`, so none block):
 #   0 = registry block found, matches the live registry
 #   1 = drift detected (details on stdout)
-#   2 = CLAUDE.md or the marker not found — NOTHING WAS CHECKED
-#   3 = marker found but the block is unparseable — NOTHING WAS CHECKED
+#   2 = CLAUDE.md or a marker not found — NOTHING WAS CHECKED
+#   3 = block found and the missing-half ran clean, but the stale half could
+#       not run (no backticked account tokens) — PARTIALLY CHECKED
 #
 # Called at the end of register-mcps.sh (the chokepoint every account change
 # funnels through) and runnable standalone any time.
@@ -42,16 +52,19 @@ ensure_python3
 load_env
 
 MARKER='<!-- openbrain:account-registry -->'
+END_MARKER='<!-- openbrain:account-registry:end -->'
 CLAUDE_MD="${CHECK_REGISTRY_CLAUDE_MD:-$REPO_ROOT/CLAUDE.md}"
 
 if [[ ! -f "$CLAUDE_MD" ]]; then
   warn "CLAUDE.md not found at $CLAUDE_MD — NOTHING WAS CHECKED"
   exit 2
 fi
-if ! grep -qF "$MARKER" "$CLAUDE_MD"; then
-  warn "registry section not found — nothing was checked."
-  warn "Opt in by adding this marker line directly above the configured-accounts"
-  warn "listing in CLAUDE.md:  $MARKER"
+if ! grep -qF "$MARKER" "$CLAUDE_MD" || ! grep -qF "$END_MARKER" "$CLAUDE_MD"; then
+  warn "registry markers not found — nothing was checked."
+  warn "Opt in by bracketing the configured-accounts listing in CLAUDE.md:"
+  warn "  $MARKER"
+  warn "  ...tables/bullets..."
+  warn "  $END_MARKER"
   exit 2
 fi
 
@@ -120,17 +133,20 @@ except Exception as e:
           file=sys.stderr)
     sys.exit(3)
 
-# The registry block: from the marker line to the next markdown heading or EOF.
+# The registry block: strictly between the paired markers. No heading parsing —
+# a populated registry nests sub-headings, and any heading rule would eat them.
 MARKER = "<!-- openbrain:account-registry -->"
+END_MARKER = "<!-- openbrain:account-registry:end -->"
 idx = text.find(MARKER)
-if idx < 0:
-    # The bash wrapper already grepped for the marker; belt-and-suspenders.
-    print("[drift] registry marker not found — nothing was checked", file=sys.stderr)
+end = text.find(END_MARKER, idx + len(MARKER)) if idx >= 0 else -1
+if idx < 0 or end < 0:
+    # The bash wrapper already grepped for both; belt-and-suspenders. An end
+    # marker that precedes the begin marker lands here too (find starts after
+    # begin), rather than silently yielding a backwards/empty block.
+    print("[drift] registry markers not found or out of order — nothing was checked",
+          file=sys.stderr)
     sys.exit(2)
-block = text[idx + len(MARKER):]
-nxt = re.search(r'^#{1,6}\s', block, re.M)
-if nxt:
-    block = block[:nxt.start()]
+block = text[idx + len(MARKER):end]
 
 # Managed MCP-key service prefixes, so a token like `google_<account_slug>` or
 # `mcp__slack_<slug>__*` (an MCP server key in prose) reduces to its bare
@@ -144,24 +160,33 @@ def strip_prefix(tok):
             return tok[len(p):]
     return tok
 
-# Claimed account slugs: every backtick token in the block, in any rendered
-# form — bare dash-form (`jane-acme-com`), bare underscore-form
-# (`jane_acme_com`), or an MCP server key (`mcp__google_jane_acme_com__*`) —
-# service-prefix-stripped and normalized to dashes. Only slug-shaped results
-# count: at least TWO separators, because every real account slug has them
-# (email → local-domain-tld; Slack → sub-slack-com). One separator would
-# sweep in ordinary hyphenated prose in backticks (`read-only`, `dev-mode`)
-# AND the presence-service names (`asana-work`) — which belong to the
-# presence diff below, not the slug diff, and would false-flag as stale here.
+# Claimed account slugs, read ONLY from MCP server keys — `mcp__google_jane_acme_com__*`
+# — never from bare backticked prose.
+#
+# A bare backticked token is not evidence of an account claim. The block is
+# hand-curated prose, and a slug is shape-indistinguishable from ordinary
+# content: the real vault's own Fathom row lists `list_team_members`, which
+# normalizes to `list-team-members` and is exactly as "slug-shaped" as
+# `jane-acme-com` (3 segments, 2 separators). No separator-count threshold
+# separates those two — tightening the shape rule only moves the false
+# positive around, which is the tell this checker's own norm names: when
+# ground truth needs inference over free-form input, move the truth into a
+# DECLARED form instead of improving the parser.
+#
+# The `mcp__<service>_<slug>__*` key IS that declared form. It is already the
+# registry's documented convention ("MCP server key: same slug with - → _"),
+# it is what the tables' first column holds, and it cannot be written by
+# accident in prose. Cost, stated rather than hidden: a registry that lists
+# only bare slugs gets no stale detection — reported as PARTIALLY CHECKED
+# below, never as clean.
 SLUGISH = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+){2,}$')
-# Accept uppercase in the token scan and lowercase FIRST (before the mcp__ /
-# prefix strips, which are written lowercase): a capitalized `Jane-Acme-Com`
-# must still enter the claimed set — dropped, it would both escape the stale
-# check and, in an all-capitalized block, false-trigger the exit-3
-# unparseable floor.
+# Uppercase accepted in the scan and lowercased FIRST (the mcp__ / prefix
+# strips are written lowercase): a capitalized `MCP__Google_Jane_Acme_Com__*`
+# must still enter the claimed set rather than escape the stale check.
 raw_tokens = re.findall(r'`([A-Za-z0-9_*.@-]+)`', block)
+mcp_keys = [t for t in raw_tokens if t.lower().startswith("mcp__")]
 claimed = set()
-for tok in raw_tokens:
+for tok in mcp_keys:
     tok = tok.lower()
     tok = re.sub(r'^mcp__', '', tok)
     tok = re.sub(r'__\*?$', '', tok)
@@ -171,16 +196,6 @@ for tok in raw_tokens:
 
 live_all = live["google"] | live["microsoft"] | live["slack"]
 live_any = bool(live_all) or has_asana_personal or has_asana_work or has_fathom
-
-# Malformed block: the marker is there but nothing parseable follows (e.g. the
-# listing was deleted or restructured beyond recognition) while live accounts
-# exist — ANY live account, not just slug-shaped ones: a vault with only asana
-# or fathom configured must hit this floor too, or an emptied block reads as
-# "in sync". Loud, non-clean.
-if not raw_tokens and live_any:
-    print("[drift] registry block is unparseable (no account tokens after the "
-          "marker) — NOTHING WAS CHECKED. Fix the block or move the marker.")
-    sys.exit(3)
 
 # An account is documented if its slug appears in the block as a whole token —
 # in dash or underscore form (covers bullets, tables, and prose) — or in the
@@ -236,17 +251,45 @@ if issues:
     print(f"[drift] {issues} mismatch(es). The registry block is hand-curated — "
           "reconcile manually (roles/status/sunset notes can't be auto-derived).")
     sys.exit(1)
-else:
-    print("[drift] CLAUDE.md registry block matches the live registry "
-          f"(google={len(live['google'])}, microsoft={len(live['microsoft'])}, "
-          f"slack={len(live['slack'])}, asana_personal={has_asana_personal}, "
-          f"asana_work={has_asana_work}, fathom={has_fathom}).")
-    sys.exit(0)
+
+# Nothing to report. Before calling that CLEAN, confirm both halves actually
+# ran — a finding is evidence the checker worked, but silence is not.
+#
+# The stale half diffs `claimed`, which is built ONLY from mcp__ keys; the
+# missing half uses mentioned(), which reads the raw block text and needs no
+# declared form at all. So a block with no mcp__ keys still gets a real missing
+# check, but its stale check is inert — and inert-and-silent is exactly what
+# must never render as "in sync". Keyed on mcp_keys, not raw_tokens: a block
+# full of backticked prose and zero mcp__ keys can check no more than an empty
+# one, and reading "has backticks" as "stale was checked" would restore the
+# silent-clean this floor exists to prevent.
+#
+# This is deliberately the ONLY place emptiness is a floor. Checking it before
+# the diff (an earlier draft did) misfires on the single most common path there
+# is: a first bootstrap renders the "_No accounts configured yet_" placeholder —
+# no tokens — then adds accounts, so the marker-to-marker block is token-free
+# while credentials exist. That is not "unparseable"; it is the exact drift this
+# script exists to catch, and it is reported above as such.
+if not mcp_keys and live_any:
+    print("[drift] no `mcp__<service>_<slug>__*` keys between the markers — the "
+          "stale-entry half of the diff could not run, so this is NOT a clean "
+          "bill of health. Nothing live is missing from the block; entries in "
+          "the block that no longer have credentials were NOT checked.")
+    print("[drift] PARTIALLY CHECKED "
+          f"(missing: {len(live_all)} live slug(s) verified present; stale: skipped).")
+    sys.exit(3)
+
+print("[drift] CLAUDE.md registry block matches the live registry "
+      f"(google={len(live['google'])}, microsoft={len(live['microsoft'])}, "
+      f"slack={len(live['slack'])}, asana_personal={has_asana_personal}, "
+      f"asana_work={has_asana_work}, fathom={has_fathom}).")
+sys.exit(0)
 PY
 
 case "$DRIFT_RC" in
   0) ok "CLAUDE.md account registry in sync with the live registry" ;;
   1) warn "CLAUDE.md account registry has drifted from the live registry (see above). Detect-only — reconcile by hand." ;;
+  3) warn "CLAUDE.md account registry only PARTIALLY checked (see above) — stale entries not verified." ;;
   *) warn "registry check could not run (see above) — NOTHING WAS CHECKED" ;;
 esac
 exit "$DRIFT_RC"
