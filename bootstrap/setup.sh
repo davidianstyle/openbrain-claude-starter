@@ -87,6 +87,10 @@ content = (content
     .replace("{{ASANA_ROUTING_TABLE}}",  "_No Asana workspaces configured yet. Run `./bootstrap/lib/add-asana.sh personal|work` to add one._")
     .replace("{{GOOGLE_ACCOUNTS_TABLE}}", "_No Google accounts configured yet. Run `./bootstrap/lib/add-google-account.sh <email>` to add one._")
     .replace("{{SLACK_WORKSPACES_TABLE}}", "_No Slack workspaces configured yet. Run `./bootstrap/lib/add-slack-workspace.sh <subdomain>` to add one._")
+    # §11's registry lists WHICH accounts are configured; §5's routing table
+    # covers HOW Asana notes route. Both name the workspaces, so both get a
+    # stub — the registry one is what check-registry-drift.sh diffs.
+    .replace("{{ASANA_WORKSPACES_TABLE}}", "_No Asana workspaces configured yet. Run `./bootstrap/lib/add-asana.sh personal|work` to add one._")
     .replace("{{FATHOM_TABLE}}", "_Fathom not configured. Run `./bootstrap/lib/add-fathom.sh` to add it._")
 )
 open(path, "w").write(content)
