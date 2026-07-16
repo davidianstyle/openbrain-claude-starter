@@ -109,35 +109,44 @@ require_env() {
   [[ -n "${!var:-}" ]] || die "$var not set in $ENV_FILE"
 }
 
-# Auto-clone and build an MCP server repo if the built artifact is missing.
-# Usage: ensure_mcp_server <repo-name>
-# E.g.:  ensure_mcp_server asana-mcp
-#   → clones github.com/davidianstyle/asana-mcp to ~/asana-mcp
-#   → runs npm install && npm run build
-#   → expects dist/index.js to exist after build
+# Auto-clone and build an MCP server source repo if its built artifact is
+# missing. Launch-time fallback for the bootstrap-time install — covers the
+# case where dist/ was deleted, the user skipped bootstrap, or a new machine
+# pulled the vault without re-running setup.
+#
+# Usage: ensure_mcp_server <name>-mcp
+#   e.g. ensure_mcp_server google-mcp
+#   → expects $HOME/Code/<name>-mcp/dist/index.js
+#   → if missing, clones $OPENBRAIN_MCP_REPO_OWNER/<name>-mcp (default
+#     davidianstyle) into $HOME/Code/, runs npm install + npm run build
 ensure_mcp_server() {
   local name="$1"
-  local repo_dir="$HOME/$name"
-  local server="$repo_dir/dist/index.js"
+  local owner="${OPENBRAIN_MCP_REPO_OWNER:-davidianstyle}"
+  local src_dir="$HOME/Code/$name"
+  local dist="$src_dir/dist/index.js"
 
-  if [[ -f "$server" ]]; then
-    return 0
+  [[ -f "$dist" ]] && return 0
+
+  echo "openbrain mcp: $name not built at $dist — auto-installing..." >&2
+
+  if [[ ! -d "$src_dir" ]]; then
+    mkdir -p "$HOME/Code"
+    echo "openbrain mcp: cloning $owner/$name → $src_dir" >&2
+    if command -v gh >/dev/null 2>&1; then
+      gh repo clone "$owner/$name" "$src_dir" >&2 \
+        || die "failed to clone $owner/$name via gh (check 'gh auth status' or set OPENBRAIN_MCP_REPO_OWNER)"
+    else
+      git clone "https://github.com/$owner/$name.git" "$src_dir" >&2 \
+        || die "failed to clone https://github.com/$owner/$name.git (install gh for private-repo auth)"
+    fi
   fi
 
-  echo "openbrain mcp: $name not found — auto-installing..." >&2
+  echo "openbrain mcp: building $name (npm install + npm run build)..." >&2
+  ( cd "$src_dir" && npm install --ignore-scripts && npm run build ) >&2 \
+    || die "failed to build $name — run 'cd $src_dir && npm install && npm run build' manually"
 
-  if [[ ! -d "$repo_dir" ]]; then
-    echo "openbrain mcp: cloning github.com/davidianstyle/$name..." >&2
-    git clone "https://github.com/davidianstyle/$name.git" "$repo_dir" >&2 \
-      || die "failed to clone $name"
-  fi
-
-  echo "openbrain mcp: building $name..." >&2
-  (cd "$repo_dir" && npm install --ignore-scripts 2>&1 && npm run build 2>&1) >&2 \
-    || die "failed to build $name — run 'cd $repo_dir && npm install && npm run build' manually"
-
-  [[ -f "$server" ]] || die "$name built but dist/index.js not found"
-  echo "openbrain mcp: $name installed at $server" >&2
+  [[ -f "$dist" ]] || die "$name built but $dist still missing"
+  echo "openbrain mcp: $name ready at $dist" >&2
 }
 
 ensure_node_on_path

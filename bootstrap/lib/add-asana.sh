@@ -14,6 +14,8 @@ case "$KIND" in
   *) die "expected personal|work, got: $KIND" ;;
 esac
 
+ensure_mcp_server asana
+
 step "Asana personal access token ($KIND)"
 cat <<'EOF'
 

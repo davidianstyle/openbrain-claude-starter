@@ -28,6 +28,8 @@ SLUG="$(email_to_slug "$EMAIL")"
 
 info "Adding Google account: $EMAIL (slug: $SLUG)"
 
+ensure_mcp_server google
+
 ensure_env_file
 load_env
 
