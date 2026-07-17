@@ -2,8 +2,9 @@
 # Register every configured MCP server with Claude Code.
 #
 # Reads ~/.config/openbrain/.env and ~/.config/openbrain/tokens/ to discover
-# which Google slugs, Slack workspaces, Asana workspaces, and Fathom keys are
-# configured, then ensures ~/.claude.json has matching mcpServers entries.
+# which Google slugs, Microsoft accounts, Slack workspaces, Asana workspaces,
+# and Fathom keys are configured, then ensures ~/.claude.json has matching
+# mcpServers entries.
 #
 # Writes launcher scripts to ~/.config/openbrain/lib/ as a side effect so the
 # MCP entries point at stable per-machine paths (not the vault repo path).
@@ -19,8 +20,9 @@ source "$HERE/common.sh"
 ensure_python3
 load_env
 
-# CLAUDE_JSON comes from common.sh (overridable via OPENBRAIN_CLAUDE_JSON for
-# sandboxed testing — never point it at live config in a test).
+# CLAUDE_JSON + CONFIG_DIR come from common.sh (overridable via OPENBRAIN_CLAUDE_JSON
+# / OPENBRAIN_CONFIG_DIR for sandboxed testing — never point them at live config
+# in a test).
 [[ -f "$CLAUDE_JSON" ]] || die "$CLAUDE_JSON not found — start Claude Code at least once to initialize it"
 
 # -----------------------------------------------------------------------------
@@ -42,6 +44,68 @@ while IFS= read -r f; do
 done < <(managed_launchers "$REPO_ROOT/.openbrain/lib")
 ok "launcher scripts installed at $LIB_DIR"
 
+# Copy and build custom MCP servers into the runtime dir.
+# We copy source (not symlink) so node_modules/dist live locally and aren't
+# affected by Google Drive streaming mode or cross-machine sync issues.
+# CONFIG_DIR (not a hardcoded ~/.config) so this honors the sandbox override too.
+# Never fatal: custom servers are an optional feature, so a missing toolchain
+# or a failing build must not abort the core account registration below —
+# warn loudly and move on instead.
+if [[ -d "$REPO_ROOT/.openbrain/mcp" ]] && ! command -v npm >/dev/null 2>&1; then
+  warn "npm not found — skipping custom MCP build (.openbrain/mcp exists but cannot be built; core MCP registration continues)"
+elif [[ -d "$REPO_ROOT/.openbrain/mcp" ]]; then
+  # Remove legacy symlink if present
+  if [[ -L "$CONFIG_DIR/mcp" ]]; then
+    rm "$CONFIG_DIR/mcp"
+  fi
+  mkdir -p "$CONFIG_DIR/mcp"
+
+  for server_dir in "$REPO_ROOT/.openbrain/mcp"/*/; do
+    [[ -d "$server_dir" ]] || continue
+    # Only process directories that look like MCP server packages
+    [[ -f "$server_dir/package.json" ]] || continue
+    server_name="$(basename "$server_dir")"
+    dest="$CONFIG_DIR/mcp/$server_name"
+    mkdir -p "$dest"
+
+    # Sync source files (exclude build artifacts)
+    rsync -a --delete \
+      --exclude node_modules \
+      --exclude dist \
+      "$server_dir" "$dest/"
+
+    # Rebuild when the built entrypoint is missing OR any synced file is newer
+    # than it. Comparing only package.json vs dist misses the common case — a
+    # source-only edit — and then re-affirms "up to date" forever (silent
+    # false-negative). dist/ and node_modules/ are pruned from the newer-scan:
+    # the build regenerates dist and npm install mutates node_modules after
+    # the build, so including either would force a rebuild every run.
+    needs_build=0
+    if [[ ! -f "$dest/dist/index.js" ]]; then
+      needs_build=1
+    elif [[ -n "$(find "$dest" \( -path "$dest/dist" -o -path "$dest/node_modules" \) -prune -o -type f -newer "$dest/dist/index.js" -print 2>/dev/null | head -1)" ]]; then
+      needs_build=1
+    fi
+    if ! "$PYTHON_BIN" -c 'import json,sys; sys.exit(0 if "build" in json.load(open(sys.argv[1])).get("scripts",{}) else 1)' "$dest/package.json" 2>/dev/null; then
+      # Plain-JS server (no build script) — runs straight from synced source.
+      ok "$server_name synced (no build script — runs from source)"
+    elif [[ "$needs_build" -eq 1 ]]; then
+      step "building $server_name MCP server"
+      build_log="$dest/.build.log"
+      # Full npm output goes to the log — tail -1 style truncation destroys
+      # the actual compile error exactly when it is needed. Failure warns and
+      # continues: one broken optional server must not block core registration.
+      if (cd "$dest" && npm install --no-fund --no-audit && npm run build) > "$build_log" 2>&1; then
+        ok "$server_name built at $dest"
+      else
+        warn "$server_name build FAILED (rc=$?) — continuing without it; core MCP registration is unaffected. Full npm output: $build_log"
+      fi
+    else
+      ok "$server_name already up to date at $dest"
+    fi
+  done
+fi
+
 # -----------------------------------------------------------------------------
 # 2. Discover configured accounts and write to a JSON plan file
 # -----------------------------------------------------------------------------
@@ -53,6 +117,16 @@ if compgen -G "$TOKEN_DIR/google-*-credentials.json" > /dev/null; then
   GOOGLE_SLUGS_JSON="$(
     for f in "$TOKEN_DIR"/google-*-credentials.json; do
       base="${f##*/}"; slug="${base#google-}"; slug="${slug%-credentials.json}"
+      printf '%s\n' "$slug"
+    done | "$PYTHON_BIN" -c 'import sys, json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))'
+  )"
+fi
+
+MICROSOFT_SLUGS_JSON='[]'
+if compgen -G "$TOKEN_DIR/microsoft-*-credentials.json" > /dev/null; then
+  MICROSOFT_SLUGS_JSON="$(
+    for f in "$TOKEN_DIR"/microsoft-*-credentials.json; do
+      base="${f##*/}"; slug="${base#microsoft-}"; slug="${slug%-credentials.json}"
       printf '%s\n' "$slug"
     done | "$PYTHON_BIN" -c 'import sys, json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))'
   )"
@@ -83,7 +157,9 @@ HAS_FATHOM=false;         [[ -n "${FATHOM_API_KEY:-}" ]]     && HAS_FATHOM=true
 cat >"$PLAN" <<EOF
 {
   "lib_dir": "$LIB_DIR",
+  "src_lib_dir": "$REPO_ROOT/.openbrain/lib",
   "google_slugs": $GOOGLE_SLUGS_JSON,
+  "microsoft_slugs": $MICROSOFT_SLUGS_JSON,
   "slack_slugs": $SLACK_SLUGS_JSON,
   "has_asana_personal": $HAS_ASANA_PERSONAL,
   "has_asana_work": $HAS_ASANA_WORK,
@@ -97,6 +173,8 @@ import json, sys
 plan = json.load(open(sys.argv[1]))
 print(f"  Google accounts: {len(plan['google_slugs'])}")
 for s in plan['google_slugs']: print(f"    • {s}")
+print(f"  Microsoft accounts: {len(plan['microsoft_slugs'])}")
+for s in plan['microsoft_slugs']: print(f"    • {s}")
 print(f"  Slack workspaces: {len(plan['slack_slugs'])}")
 for s in plan['slack_slugs']: print(f"    • {s}")
 print(f"  Asana personal: {plan['has_asana_personal']}")
@@ -116,6 +194,7 @@ from pathlib import Path
 claude_path = Path(sys.argv[1]).resolve()
 plan = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 lib_dir = plan["lib_dir"].rstrip("/")
+src_lib_dir = plan["src_lib_dir"].rstrip("/")
 
 # Parse the live file FIRST. If it doesn't parse, abort before touching any
 # backup — never let a corrupt registry overwrite the last good backup.
@@ -144,6 +223,18 @@ for old in backups[:-5]:
 servers = data.setdefault("mcpServers", {})
 
 def stdio(name, script, *args):
+    # Launcher-existence guard, checked against the REPO's launcher set (the
+    # source section 1 installs from) — NOT the deployed lib_dir: a stale
+    # launcher left in lib_dir by a prior deploy of a since-changed repo would
+    # otherwise pass the guard here and then be orphan-removed by section 4 in
+    # the same run, stranding a registry entry whose command no longer exists.
+    # Feature-ahead entries (e.g. gtasks_/mstodo_) stay safe to carry: they
+    # self-suppress on repos that don't ship those launchers. (If the repo
+    # ships it, section 1 has already copied it into lib_dir, so the entry's
+    # command path is guaranteed present.)
+    if not os.path.exists(os.path.join(src_lib_dir, script)):
+        print(f"[register-mcps] skip {name}: launcher {script} not shipped by this repo (inert)")
+        return
     servers[name] = {
         "type": "stdio",
         "command": f"{lib_dir}/{script}",
@@ -157,8 +248,12 @@ def stdio(name, script, *args):
 # google_*/slack_* whose command path merely contained "openbrain"
 # (e.g. ~/openbrain-tools/...). The prefix list only narrows which keys we even
 # consider, so a foreign server outside lib_dir is always safe.
-managed_prefixes = ("asana_", "gmail_", "gcal_", "gmeet_", "gdrive_", "gslides_", "google_", "slack_")
+# gtasks_/mstodo_ are carried here (feature-ahead) so a machine that DOES ship
+# those launchers still gets its stale entries cleaned; harmless where absent.
+managed_prefixes = ("asana_", "gmail_", "gcal_", "gmeet_", "gdrive_", "gslides_",
+                    "gtasks_", "mstodo_", "google_", "slack_")
 resolved_lib_dir = Path(lib_dir).resolve()  # constant across the loop; resolve() stats the filesystem
+removed_managed = []  # so a delete-without-re-register can warn below instead of vanishing silently
 for k in list(servers.keys()):
     v = servers[k]
     cmd = v.get("command") if isinstance(v, dict) else ""
@@ -179,6 +274,7 @@ for k in list(servers.keys()):
         cmd_path = Path(cmd)
         if cmd_path.is_absolute() and cmd_path.parent.resolve() == resolved_lib_dir:
             del servers[k]
+            removed_managed.append(k)
 
 if plan["has_asana_personal"]:
     stdio("asana_personal", "asana-mcp.sh", "personal")
@@ -188,6 +284,11 @@ if plan["has_asana_work"]:
 for slug in plan["google_slugs"]:
     key = slug.replace("-", "_")
     stdio(f"google_{key}", "google-mcp.sh", slug)
+    stdio(f"gtasks_{key}", "gtasks-mcp.sh", slug)
+
+for slug in plan["microsoft_slugs"]:
+    key = slug.replace("-", "_")
+    stdio(f"mstodo_{key}", "mstodo-mcp.sh", slug)
 
 for slug in plan["slack_slugs"]:
     key = slug.replace("-", "_")
@@ -195,6 +296,14 @@ for slug in plan["slack_slugs"]:
 
 if plan["has_fathom"]:
     stdio("fathom", "fathom-mcp.sh")
+
+# A managed entry that the cleanup removed and no stdio() call re-registered
+# has VANISHED this run — the account is still configured but its launcher is
+# no longer shipped by this repo. That must be loud (stderr), not a scroll-by
+# skip line: every skill routing to that server fails at next session.
+vanished = sorted(k for k in removed_managed if k not in servers)
+if vanished:
+    print(f"[register-mcps] WARNING: previously-registered managed entries removed and NOT re-registered this run: {', '.join(vanished)} — their launchers are not shipped by this repo; skills routing to them will fail", file=sys.stderr)
 
 # Atomic write: serialize, write to a temp sibling, parse-verify, then
 # os.replace (atomic on the same filesystem). A crash mid-write can't leave a
@@ -251,3 +360,23 @@ fi
 step "Done registering MCPs"
 info "Restart Claude Code so it picks up the new mcpServers entries"
 info "Verify with: claude mcp list (or run /mcp inside a session)"
+
+# -----------------------------------------------------------------------------
+# 5. Keep the clone's PII gate patterns in sync with the account registry
+#    (sync model v2). register-mcps.sh is the chokepoint every account
+#    add/remove funnels through, so it's where the gate's patterns get
+#    refreshed. No-op on repos that don't ship bootstrap/lib/pii-reseed.sh —
+#    the script lands with the pii-autoseed topic; until then this call is a
+#    documented inert contract point, not a live feature.
+# -----------------------------------------------------------------------------
+# -f + explicit bash, not -x + direct exec: a lost executable bit (ZIP
+# extraction, some shared mounts) would silently skip the reseed — the same
+# silent-failure class the drift-check call above guards against.
+# || warn, not || true: the reseed MUTATES the PII gate's pattern set; a
+# swallowed failure leaves the gate matching stale patterns, and a later
+# template push could leak a new account's identifiers with every check
+# reporting clean. Still non-blocking — bootstrap continues.
+if [[ -f "$HERE/pii-reseed.sh" ]]; then
+  step "Syncing PII gate patterns with the account registry"
+  bash "$HERE/pii-reseed.sh" || warn "pii-reseed FAILED (rc=$?) — PII gate patterns may be stale; fix before the next template push"
+fi
