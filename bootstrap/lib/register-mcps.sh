@@ -365,9 +365,9 @@ info "Verify with: claude mcp list (or run /mcp inside a session)"
 # 5. Keep the clone's PII gate patterns in sync with the account registry
 #    (sync model v2). register-mcps.sh is the chokepoint every account
 #    add/remove funnels through, so it's where the gate's patterns get
-#    refreshed. No-op on repos that don't ship bootstrap/lib/pii-reseed.sh —
-#    the script lands with the pii-autoseed topic; until then this call is a
-#    documented inert contract point, not a live feature.
+#    refreshed. pii-reseed.sh is script-only and this is its only caller; it
+#    ships with the pii-gate topic. Skipped when the repo doesn't ship it, and
+#    a no-op (with a note) on a machine with no clone patterns file to refresh.
 # -----------------------------------------------------------------------------
 # -f + explicit bash, not -x + direct exec: a lost executable bit (ZIP
 # extraction, some shared mounts) would silently skip the reseed — the same
