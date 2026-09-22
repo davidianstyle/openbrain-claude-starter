@@ -96,13 +96,21 @@ if [ -f "$SETTINGS_FILE" ]; then
   # `|| true`, a crash leaves the copy untouched, cmp matches, and the check
   # falsely reports no hook drift. Flagging drift instead routes --apply to
   # run the wirer against the live file, where the real error surfaces loudly.
-  if bash "$VAULT/bootstrap/lib/wire-claude-hooks.sh" "$VAULT" "$tmpdir/settings.json" >/dev/null 2>&1; then
+  # rc=4 is the wirer's REFUSAL contract (an owned entry it cannot safely
+  # repair) — a determinate state needing a manual fix, not an unknown one;
+  # report it as such rather than as a crash.
+  wirer_rc=0
+  bash "$VAULT/bootstrap/lib/wire-claude-hooks.sh" "$VAULT" "$tmpdir/settings.json" >/dev/null 2>&1 || wirer_rc=$?
+  if [ "$wirer_rc" = 0 ]; then
     if ! cmp -s "$SETTINGS_FILE" "$tmpdir/settings.json" 2>/dev/null; then
       findings="${findings}  hook-wiring: openbrain SessionStart/Stop entries need (re)wiring"$'\n'
       hook_drift=1
     fi
+  elif [ "$wirer_rc" = 4 ]; then
+    findings="${findings}  hook-wiring: an openbrain hook entry needs a MANUAL fix — the wirer refused to auto-repair it (run --apply to see the exact instructions)"$'\n'
+    hook_drift=1
   else
-    findings="${findings}  hook-wiring: wire-claude-hooks.sh FAILED against current settings.json (drift state unknown — run --apply to surface the error)"$'\n'
+    findings="${findings}  hook-wiring: wire-claude-hooks.sh FAILED (rc=$wirer_rc) against current settings.json (drift state unknown — run --apply to surface the error)"$'\n'
     hook_drift=1
   fi
 else
@@ -171,10 +179,23 @@ if [ "$launcher_drift" = 1 ]; then
   fi
 fi
 
+wirer_apply_rc=0
 if [ "$hook_drift" = 1 ]; then
   log "wiring Claude hooks via wire-claude-hooks.sh"
-  bash "$VAULT/bootstrap/lib/wire-claude-hooks.sh" "$VAULT" "$SETTINGS_FILE"
+  # No bare call: under set -e a wirer refusal (rc=4) or crash would abort the
+  # script HERE — after launchers were already deployed above — and the
+  # RESTART REQUIRED notice below would never print, leaving the user running
+  # the old runtime with no signal. Capture the rc, finish the run, exit with
+  # it at the end (a refusal must stay loud, not be swallowed into exit 0).
+  bash "$VAULT/bootstrap/lib/wire-claude-hooks.sh" "$VAULT" "$SETTINGS_FILE" || wirer_apply_rc=$?
   restart=1
+  if [ "$wirer_apply_rc" != 0 ]; then
+    warn "wire-claude-hooks.sh exited $wirer_apply_rc — hook wiring is NOT fully converged."
+    if [ "$wirer_apply_rc" = 4 ]; then
+      warn "It REFUSED one or more entries (exact manual fix printed above); other"
+      warn "entries and the launcher deploy above still applied."
+    fi
+  fi
 fi
 
 if [ "$restart" = 1 ]; then
@@ -182,4 +203,4 @@ if [ "$restart" = 1 ]; then
   log "RESTART REQUIRED — the running Claude session still has the OLD runtime"
   log "loaded; restart Claude Code so the deployed launchers/hooks take effect."
 fi
-exit 0
+exit "$wirer_apply_rc"

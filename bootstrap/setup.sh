@@ -254,10 +254,20 @@ EOF
 
   # Wire the auto-sync hooks via the shared, merge-safe wirer — the single
   # source of truth for this wiring (the pull's runtime-reconcile calls the same
-  # script). On a fresh install it creates the canonical entries; on a re-run it
-  # preserves any user customizations (env prepend, timeout, statusMessage) and
-  # only fixes a stale script path.
-  bash "$REPO_ROOT/bootstrap/lib/wire-claude-hooks.sh" "$REPO_ROOT"
+  # script). On a fresh install it creates the canonical entries (self-resolving
+  # "$CLAUDE_PROJECT_DIR" path); on a re-run it no-ops if the entry is already
+  # that placeholder, and REFUSES (printing the exact one-time manual fix) for
+  # any other existing command — it never auto-rewrites (inference-free).
+  # A nonzero rc here is a REFUSAL (exit 4: an existing hook entry the wirer
+  # can't safely repair — the wirer already printed the exact manual fix) or a
+  # crash. Either way, halt setup loudly and name what happened: under bare
+  # `set -e` the abort would be silent after the wirer's own message, and an
+  # aborted setup is easy to misread as a completed one.
+  if ! bash "$REPO_ROOT/bootstrap/lib/wire-claude-hooks.sh" "$REPO_ROOT"; then
+    warn "hook wiring FAILED or was refused — read the message above, apply the"
+    warn "fix it names, then re-run setup. Stopping here (setup is NOT complete)."
+    exit 1
+  fi
   ok "auto git sync hooks enabled in .claude/settings.json"
 else
   ok "skipped — you can enable them later by re-running setup or editing .claude/settings.json"
