@@ -22,6 +22,14 @@ Built for people who want Claude to act on their calendar, email, tasks, and not
 - **Claude Code** — [installation instructions](https://docs.claude.com/en/docs/claude-code/setup)
 - **Obsidian** — [download](https://obsidian.md)
 - Optional: **GitHub CLI** (`brew install gh`) if you want automated remote setup
+- Optional: **uv** (`brew install uv`) — makes the PII-scanner install much faster and
+  sidesteps Python-version issues; setup falls back to `python3 -m venv` without it
+
+Setup also installs a **local PII scanner** (Microsoft Presidio + spaCy; ~430MB model,
+~570MB venv, a few minutes on first run). It is required: the push and pull skills scan
+everything they publish or take in for personal data, and refuse to run if the scanner
+is missing rather than fall back to a pattern list. The text it reads never leaves your
+machine. See `bootstrap/PII-SCAN-CONTRACT.md`.
 
 ---
 
@@ -62,6 +70,8 @@ The wizard is not a one-shot. You can add services any time:
 ./bootstrap/lib/add-asana.sh personal                    # or work
 ./bootstrap/lib/add-fathom.sh
 ./bootstrap/lib/register-mcps.sh                         # re-sync ~/.claude.json
+./bootstrap/lib/install-pii-scan.sh                      # install/repair the PII scanner
+./bootstrap/lib/install-pii-scan.sh --check              # verify it; 0 healthy, 2 not
 ```
 
 Each script is idempotent — safe to re-run.

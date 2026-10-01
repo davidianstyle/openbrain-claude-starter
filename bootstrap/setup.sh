@@ -46,7 +46,7 @@ fi
 # -----------------------------------------------------------------------------
 # Step 1: prereqs (auto-installs missing dependencies)
 # -----------------------------------------------------------------------------
-step "1/9 · Checking & installing prerequisites"
+step "1/10 · Checking & installing prerequisites"
 ensure_prereqs
 
 # If asdf is active, ensure .tool-versions exists so node/python resolve in this dir
@@ -59,17 +59,38 @@ if command -v asdf >/dev/null 2>&1 && [[ ! -f "$REPO_ROOT/.tool-versions" ]]; th
 fi
 
 # -----------------------------------------------------------------------------
-# Step 2: user profile
+# Step 2: PII scanner (REQUIRED — the outbound sync gate depends on it)
 # -----------------------------------------------------------------------------
-step "2/9 · Tell me about yourself"
+step "2/10 · Installing the PII scanner"
+cat <<'EOF'
+The push and pull sync skills scan everything they publish or take in
+for personal data using a local NER model (Microsoft Presidio + spaCy).
+The text being scanned never leaves your machine. A pattern list only catches
+identifiers someone enumerated in advance; the leaks that matter are the ones
+nobody thought of. Without this scanner those skills refuse to run rather than
+fall back to patterns alone.
+
+First install downloads ~430MB of model (~570MB venv) and takes a few minutes.
+Later runs are a no-op.
+EOF
+if ! "$HERE/lib/install-pii-scan.sh"; then
+  warn "PII scanner not installed — pushing to and pulling from the template"
+  warn "will refuse until you run:"
+  warn "  ./bootstrap/lib/install-pii-scan.sh"
+fi
+
+# -----------------------------------------------------------------------------
+# Step 3: user profile
+# -----------------------------------------------------------------------------
+step "3/10 · Tell me about yourself"
 
 USER_NAME="$(prompt 'Your full name' "${USER:-}")"
 USER_VOICE="$(prompt 'Describe your writing voice in a sentence' 'direct, terse, no filler')"
 
 # -----------------------------------------------------------------------------
-# Step 3: customize CLAUDE.md
+# Step 4: customize CLAUDE.md
 # -----------------------------------------------------------------------------
-step "3/9 · Customizing CLAUDE.md"
+step "4/10 · Customizing CLAUDE.md"
 
 BOOTSTRAP_DATE="$(date +%Y-%m-%d)"
 CLAUDE_MD="$REPO_ROOT/CLAUDE.md"
@@ -133,18 +154,18 @@ EOF
 fi
 
 # -----------------------------------------------------------------------------
-# Step 4: install config dir + env
+# Step 5: install config dir + env
 # -----------------------------------------------------------------------------
 # The shared-layer dir setup + launcher install lives in lib/minimal-init.sh
 # so external consumers can re-use it without inheriting the rest of this
 # wizard. Inlined logic was equivalent; see commit history.
-step "4/9 · Installing ~/.config/openbrain/"
+step "5/10 · Installing ~/.config/openbrain/"
 "$HERE/lib/minimal-init.sh"
 
 # -----------------------------------------------------------------------------
-# Step 5: wire up services
+# Step 6: wire up services
 # -----------------------------------------------------------------------------
-step "5/9 · Wiring up services"
+step "6/10 · Wiring up services"
 
 # Google — optional but recommended
 if yes_no "Wire up Google accounts (Gmail + Calendar + Meet + Drive)?" y; then
@@ -179,15 +200,15 @@ if yes_no "Wire up Fathom?" y; then
 fi
 
 # -----------------------------------------------------------------------------
-# Step 6: register MCPs in ~/.claude.json
+# Step 7: register MCPs in ~/.claude.json
 # -----------------------------------------------------------------------------
-step "6/9 · Registering MCPs with Claude Code"
+step "7/10 · Registering MCPs with Claude Code"
 "$HERE/lib/register-mcps.sh"
 
 # -----------------------------------------------------------------------------
-# Step 7: git hook
+# Step 8: git hook
 # -----------------------------------------------------------------------------
-step "7/9 · Git hooks"
+step "8/10 · Git hooks"
 if [[ -d "$REPO_ROOT/.git" ]]; then
   HOOK="$REPO_ROOT/.git/hooks/pre-commit"
   if [[ ! -e "$HOOK" ]] || ! cmp -s "$REPO_ROOT/.openbrain/pre-commit.sh" "$HOOK"; then
@@ -210,9 +231,9 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 8: auto-commit/auto-pull hooks (opt-in)
+# Step 9: auto-commit/auto-pull hooks (opt-in)
 # -----------------------------------------------------------------------------
-step "8/9 · Auto git sync hooks"
+step "9/10 · Auto git sync hooks"
 cat <<EOF
 OpenBrain can auto-commit and push your vault when Claude Code stops, and
 auto-pull when it starts. This keeps your vault in sync across devices
@@ -264,9 +285,9 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 9: validate
+# Step 10: validate
 # -----------------------------------------------------------------------------
-step "9/9 · Validating install"
+step "10/10 · Validating install"
 "$HERE/lib/validate.sh" || true
 
 # -----------------------------------------------------------------------------

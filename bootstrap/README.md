@@ -15,13 +15,15 @@ What each step does:
 | # | Step | What it touches |
 |---|---|---|
 | 1 | Prereq check | python3, node, git; warns if `gh` or `claude` CLIs missing |
-| 2 | User profile | prompts for name and writing voice |
-| 3 | CLAUDE.md customization | substitutes placeholders in the repo's CLAUDE.md |
-| 4 | Install config dir | creates `~/.config/openbrain/{,tokens,lib,venv}`, copies `.openbrain/env.example` → `.env` |
-| 5 | Wire services | loops through each service, calls the matching `add-*.sh` |
-| 6 | Register MCPs | writes `~/.claude.json` via `register-mcps.sh` |
-| 7 | Git pre-commit hook | symlinks `.git/hooks/pre-commit` → `.openbrain/pre-commit.sh` |
-| 8 | Validate | runs `validate.sh` (non-blocking) |
+| 2 | PII scanner | `install-pii-scan.sh` — Presidio + spaCy venv (~570MB, first run only) |
+| 3 | User profile | prompts for name and writing voice |
+| 4 | CLAUDE.md customization | substitutes placeholders in the repo's CLAUDE.md |
+| 5 | Install config dir | creates `~/.config/openbrain/{,tokens,lib,venv}`, copies `.openbrain/env.example` → `.env` |
+| 6 | Wire services | loops through each service, calls the matching `add-*.sh` |
+| 7 | Register MCPs | writes `~/.claude.json` via `register-mcps.sh` |
+| 8 | Git hooks | symlinks `.git/hooks/pre-commit` → `.openbrain/pre-commit.sh`, plus the pre-push guardrail |
+| 9 | Auto git sync hooks | wires the Claude Code Stop / SessionStart hooks |
+| 10 | Validate | runs `validate.sh` (non-blocking) |
 
 ## Architecture: what's brain-specific vs. shared
 
@@ -79,6 +81,18 @@ Adds an Asana Personal Access Token. Stores `ASANA_PAT_PERSONAL` or `ASANA_PAT_W
 ### `add-fathom.sh`
 
 Adds a Fathom API key. Stores `FATHOM_API_KEY` in `.env`.
+
+### `install-pii-scan.sh`
+
+Installs (or repairs) the local PII scanner the outbound sync skills depend on: a dedicated Python venv holding `presidio-analyzer`, `presidio-anonymizer`, `spacy` and the `en_core_web_lg` model, plus a `pii-scan` symlink in `~/.local/bin`. Idempotent — a no-op when the scanner is already healthy.
+
+```bash
+./bootstrap/lib/install-pii-scan.sh            # install if missing, verify
+./bootstrap/lib/install-pii-scan.sh --check    # verify only. exit 0 healthy, 2 not
+./bootstrap/lib/install-pii-scan.sh --force    # rebuild the venv from scratch
+```
+
+It always finishes by running `pii-scan --selftest`, which asserts the NER model really detects a name — having the packages installed is not evidence the scanner works. Uses `uv` when available (much faster, fetches its own Python 3.12); otherwise needs a system Python between 3.9 and 3.13, since spaCy's compiled wheels lag new CPython releases. Roughly 430MB of model (~570MB venv) and a few minutes on first run.
 
 ### `register-mcps.sh`
 
