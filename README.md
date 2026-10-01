@@ -132,7 +132,7 @@ Each script is idempotent — safe to re-run.
 | `/sync-people` | Discovery pass across Gmail/Calendar/Slack to find unknown people |
 | `/weekly-review` | Monday synthesis |
 | `/push-openbrain-template` | Genericize vault improvements and open a PR against the template repo |
-| `/pull-openbrain-claude-starter` | Pull latest template changes into the vault interactively |
+| `/pull-openbrain-template` | Pull the template's `main` into the vault: per-file merge from the last applied marker (`.openbrain/local/taken.tsv`), incoming content scanned before it lands |
 | `/asana` | Quick view of upcoming Asana tasks with interactive check-off |
 
 Skills are markdown procedures — Claude reads the SKILL.md and performs the steps. No code execution.

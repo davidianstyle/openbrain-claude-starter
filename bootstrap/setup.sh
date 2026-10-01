@@ -230,6 +230,58 @@ else
   warn "not a git repo — skipping git hooks. Run 'git init' then re-run this script."
 fi
 
+# The pull skill's baseline: /pull-openbrain-template starts only from a declared `upstream` row in
+# .openbrain/local/taken.tsv (per machine, gitignored). Setup records the last template commit this vault
+# carries — `git merge-base HEAD <template>/main`, against the same source pull uses: the template clone at
+# OPENBRAIN_TEMPLATE_DIR (default ~/openbrain-claude-starter), its `upstream` remote, else `origin`, fetched first.
+# No template clone, or no shared history (a zip or "Use this template" install): warn, no row — the pull then asks.
+# Every git failure is CANNOT-CHECK: warned, no row, never a guess. Never overwrites a declared row; re-runs are a no-op.
+# --- setup: upstream-baseline ---
+BASELINE_MARK="$REPO_ROOT/.openbrain/local/taken.tsv"
+BL_NOROW="no upstream baseline recorded; /pull-openbrain-template will ask for one"
+if [[ ! -d "$REPO_ROOT/.git" ]]; then
+  warn "not a git repo — $BL_NOROW"
+else
+  brc=0; [[ ! -f "$BASELINE_MARK" ]] || LC_ALL=C awk -F'\t' '$1=="upstream" {f=1} END {exit !f}' "$BASELINE_MARK" || brc=$?
+  BL_T="${OPENBRAIN_TEMPLATE_DIR:-$HOME/openbrain-claude-starter}"
+  if [[ -f "$BASELINE_MARK" && "$brc" -eq 0 ]]; then
+    ok "upstream baseline already declared in $BASELINE_MARK"
+  elif [[ -f "$BASELINE_MARK" && "$brc" -ne 1 ]]; then
+    warn "CANNOT-CHECK — could not read $BASELINE_MARK (awk exit $brc) — $BL_NOROW"
+  elif ! BL_HEAD="$(git -C "$REPO_ROOT" rev-parse -q --verify 'HEAD^{commit}')"; then
+    warn "HEAD has no commit — $BL_NOROW"
+  elif [[ ! -d "$BL_T/.git" ]]; then
+    warn "no template clone at $BL_T (set OPENBRAIN_TEMPLATE_DIR) — $BL_NOROW"
+  elif ! BL_REMS="$(git -C "$BL_T" remote)"; then
+    warn "CANNOT-CHECK — git remote failed in $BL_T — $BL_NOROW"
+  else
+    BL_R=""; printf '%s\n' "$BL_REMS" | LC_ALL=C command grep -qx origin && BL_R=origin
+    printf '%s\n' "$BL_REMS" | LC_ALL=C command grep -qx upstream && BL_R=upstream
+    if [[ -z "$BL_R" ]]; then
+      warn "CANNOT-CHECK — the template clone $BL_T has neither an 'upstream' nor an 'origin' remote — $BL_NOROW"
+    elif ! GIT_TERMINAL_PROMPT=0 git -C "$BL_T" fetch -q "$BL_R"; then
+      warn "CANNOT-CHECK — git fetch $BL_R failed in $BL_T (a stale template would give a wrong baseline) — $BL_NOROW"
+    elif ! BL_TIP="$(git -C "$BL_T" rev-parse -q --verify "refs/remotes/$BL_R/main^{commit}")"; then
+      warn "CANNOT-CHECK — refs/remotes/$BL_R/main does not resolve in $BL_T — $BL_NOROW"
+    elif ! git -C "$REPO_ROOT" fetch -q "$BL_T" "refs/remotes/$BL_R/main"; then
+      warn "CANNOT-CHECK — could not fetch the template's $BL_R/main into this vault for the merge-base — $BL_NOROW"
+    else
+      mbrc=0; BL_SHA="$(git -C "$REPO_ROOT" merge-base "$BL_HEAD" "$BL_TIP")" || mbrc=$?
+      if [[ "$mbrc" -eq 1 ]]; then
+        warn "this vault shares no history with the template ($BL_T, $BL_R/main) — no shared history (a zip or 'Use this template' install) — $BL_NOROW"
+      elif [[ "$mbrc" -ne 0 || -z "$BL_SHA" ]]; then
+        warn "CANNOT-CHECK — git merge-base failed (exit $mbrc) — $BL_NOROW"
+      else
+        mkdir -p "$REPO_ROOT/.openbrain/local" \
+          && printf 'upstream\t%s\t%s\n' "$BL_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$BASELINE_MARK" \
+          && ok "upstream baseline recorded: $BL_SHA (git merge-base HEAD $BL_R/main of $BL_T) in $BASELINE_MARK" \
+          || warn "CANNOT-CHECK — could not write $BASELINE_MARK — $BL_NOROW"
+      fi
+    fi
+  fi
+fi
+# --- end setup: upstream-baseline ---
+
 # -----------------------------------------------------------------------------
 # Step 9: auto-commit/auto-pull hooks (opt-in)
 # -----------------------------------------------------------------------------
