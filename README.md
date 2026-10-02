@@ -120,6 +120,9 @@ Each script is idempotent — safe to re-run.
 | `/what-am-i-missing` | Surface overdue tasks, cadence misses, unanswered mail |
 | `/people-audit` | Cadence health report + regenerate People MOC |
 | `/sync-people` | Discovery pass across Gmail/Calendar/Slack to find unknown people |
+| `/sync-organizations` | Discovery pass across Gmail/Calendar/Slack/Fathom for organizations not yet captured; stages candidates for review |
+| `/sync-places` | Discovery pass across Calendar (plus mail/Fathom signal) for physical places not yet captured; stages candidates for review |
+| `/learn-writing-style` | Derive a writing-style profile from your sent mail and Slack, then update CLAUDE.md §6 |
 | `/weekly-review` | Monday synthesis |
 | `/push-openbrain-claude-starter` | Genericize vault improvements and open a PR against the template repo |
 | `/pull-openbrain-claude-starter` | Pull latest template changes into the vault interactively |
