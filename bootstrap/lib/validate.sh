@@ -81,7 +81,8 @@ if compgen -G "$TOKEN_DIR/google-*-credentials.json" > /dev/null; then
 fi
 info "Google accounts with credentials: $GCOUNT"
 
-SCOUNT="$(grep -cE '^SLACK_TOKEN_[A-Z0-9_]+=.+' "$ENV_FILE" 2>/dev/null || echo 0)"
+# grep -c prints its own 0 on no match (exit 1); an `|| echo 0` fallback would print a second one.
+SCOUNT="$(grep -cE '^SLACK_TOKEN_[A-Z0-9_]+=.+' "$ENV_FILE" 2>/dev/null)"; SCOUNT="${SCOUNT:-0}"
 info "Slack workspaces with tokens: $SCOUNT"
 
 [[ -n "${ASANA_PAT_PERSONAL:-}" ]] && ok "Asana personal token set" || info "no Asana personal token (optional)"

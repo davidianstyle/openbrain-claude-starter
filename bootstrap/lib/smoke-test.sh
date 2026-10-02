@@ -7,15 +7,17 @@
 # This is the pre-install counterpart to validate.sh: validate.sh checks whether
 # *this machine's install* is healthy (real ~/.config/openbrain + ~/.claude.json
 # state, after setup.sh has run); smoke-test.sh checks whether the *code in this
-# checkout* is sound, before you install anything. Three tiers:
+# checkout* is sound, before you install anything. Four tiers:
 #
 #   1. every shell script under bootstrap/ and .openbrain/ parses (bash -n)
 #   2. minimal-init.sh stands up the shared layer in a throwaway $HOME —
 #      dirs + .env + launchers, and is idempotent on a re-run   [if present]
 #   3. the _oauth_env indirect-expansion helper behaves under set -u:
 #      set var -> value, unset var -> empty (no crash)          [if present]
+#   4. validate.sh runs clean in a throwaway $HOME with zero Slack tokens —
+#      exit 0, no arithmetic syntax error, no stray count line  [if present]
 #
-# Tiers 2 and 3 self-skip when the feature isn't in the tree yet, so the script
+# Tiers 2-4 self-skip when the feature isn't in the tree yet, so the script
 # is safe to run at any point in the repo's history and grows coverage as those
 # land. Exits non-zero on the first hard failure — CI-friendly.
 #
@@ -109,6 +111,22 @@ if grep -qE '_oauth_env[[:space:]]*\(\)' "$LIBDIR/common.sh" 2>/dev/null; then
   fi
 else
   skip "_oauth_env not present — skipping"
+fi
+
+# ---------------------------------------------------------------------------
+# 4. validate.sh with zero Slack tokens: a token count must be a single number.
+# ---------------------------------------------------------------------------
+sect "validate.sh (sandbox HOME, zero Slack tokens)"
+if [[ -f "$LIBDIR/validate.sh" ]]; then
+  vhome="$TMPROOT/validate"; mkdir -p "$vhome/.config/openbrain"
+  printf 'GOOGLE_OAUTH_CLIENT_ID=\n' > "$vhome/.config/openbrain/.env"   # an .env with no SLACK_TOKEN_* line
+  rc=0; out="$(HOME="$vhome" OPENBRAIN_CONFIG_DIR= OPENBRAIN_ENV_FILE= OPENBRAIN_TOKEN_DIR= bash "$LIBDIR/validate.sh" 2>&1 </dev/null)" || rc=$?
+  if (( rc != 0 )); then fail "validate.sh exited $rc"
+  elif grep -q 'syntax error' <<<"$out"; then fail "validate.sh: $(grep -m1 'syntax error' <<<"$out")"
+  elif grep -qE '^[0-9]+$' <<<"$out"; then fail "validate.sh printed a bare number line (a count printed twice?)"
+  else pass "exit 0, no syntax error, no stray count line"; fi
+else
+  skip "validate.sh not present — skipping"
 fi
 
 # ---------------------------------------------------------------------------
