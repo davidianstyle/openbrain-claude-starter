@@ -32,7 +32,7 @@ mkdir -p "$LIB_DIR"
 chmod 755 "$LIB_DIR"
 # Deploy ONLY the runtime launcher set (managed_launchers in common.sh is the
 # single definition — *-mcp.sh + _common.sh). Other .openbrain/lib/*.sh
-# (clone-pii-gate.sh, rebuild-next.sh) are clone-tier tooling that runs from
+# (clone-pii-gate.sh, template-scope.sh) are clone-tier tooling that runs from
 # the repo, not the per-machine runtime — don't pollute LIB_DIR with them.
 while IFS= read -r f; do
   dest="$LIB_DIR/$(basename "$f")"

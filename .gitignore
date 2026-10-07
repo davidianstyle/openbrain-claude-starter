@@ -22,3 +22,7 @@
 # (Users should commit their customized CLAUDE.md to their own private vault repo.)
 
 .tool-versions
+
+# Per-machine PII gate state (the pattern list is itself concentrated PII —
+# must never be committed; the clone gate reads it from .openbrain/local/)
+.openbrain/local/

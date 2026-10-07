@@ -116,7 +116,7 @@ check_mcp_built() {
 step "Claude MCP registration"
 CLAUDE_JSON="$HOME/.claude.json"
 if [[ -f "$CLAUDE_JSON" ]]; then
-  MCP_COUNT="$("$PYTHON_BIN" -c "
+  MCP_COUNT="$("${PYTHON_BIN:-python3}" -c "
 import json
 d = json.load(open('$CLAUDE_JSON'))
 servers = d.get('mcpServers', {})

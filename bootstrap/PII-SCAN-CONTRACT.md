@@ -63,9 +63,9 @@ Measured on real repository files.
 
 Consequences for the caller:
 
-- **Present findings for human disposition; never auto-block on a count.** One prompt per finding — fix / drop the file / accept with a recorded reason.
-- **Junk cannot be separated by score.** `--git` scores 0.85 as `PERSON`, identical to a real name. Mode selection shortens the list; only a human makes it trustworthy. This is why the disposition step is mandatory.
-- **Complement, not replacement, for the deterministic pattern list.** Patterns catch enumerated account identifiers; NER catches the un-enumerable third-party name. Run both.
+- **Never auto-block on a count, and never show raw NER output to a human.** Every hit is listed with its `file:line`. The outbound caller hands every NER hit to a fresh reading agent, which answers each one and reads every added line besides; the human reads the agent's flags and the deterministic pattern hits, decided once per run (declining it means one decision per flag or pattern hit — fix / drop the file / accept with a recorded reason). See below.
+- **Junk cannot be separated by score.** `--git` scores 0.85 as `PERSON`, identical to a real name. Mode selection shortens the list; only a reader makes it trustworthy. This is why the agent pass and the human OK are mandatory.
+- **Complement, not replacement, for the deterministic pattern list.** Patterns catch enumerated account identifiers; NER points the reader at un-enumerable third-party names. Run both.
 
 Whether a heavier local model removes the junk, and what it costs in latency, is an open deferred question.
 
@@ -99,7 +99,16 @@ Measuring the whole segment instead of its tokens would reject `Named-entity_rec
 
 **Any URL in the file failing either condition drops that whole file back to one prompt per URL.** Do not group the compliant subset and single out the rest — that splits the operator's attention exactly where it should be concentrated.
 
-**This is a grouping, not a suppression.** Every URL is still detected, still shown, and still dispositioned; only the number of prompts changes. `URL` is never removed from the scan — see the modes note above. No other entity type may be grouped.
+**This is a grouping, not a suppression.** Every URL is still detected, still shown, and still dispositioned; only the number of prompts changes. `URL` is never removed from the scan — see the modes note above.
+
+### Outbound: NER hits go to the agent; pattern hits go to the human
+
+Measured on 216 fictional leaks planted into ten real outbound changes: NER found 68% of them and none at all of five classes (handles, ALL-CAPS surnames, client names, codenames, deal amounts); every rule that routed NER hits to "counted, no decision" or onto a human screen could only reorder what NER found, and the screen it produced was 44–88 strings per change, nearly all junk. A fresh reading agent found 95–97% per run. So the outbound caller (`/push-openbrain-template` step 4–5) routes nothing:
+
+- **Every NER hit goes to the agent.** One item per distinct `(type, text)`, each with an id and every place it occurs — the change's files, the commit message, the PR title and body, the branch name, the path list. The agent answers `ok` or `flag` for every id, and a check refuses a reply that skips one (a skipped id is CANNOT-CHECK, never a pass). The NER list supplements the agent's read; it is not the checklist: the agent reads every added line, and every line of the commit message and PR text, besides.
+- **The declared fakes are a rule in the agent's brief, generated from `bootstrap/lib/pii-fakes.txt` at every run** (`Jane Q. Doe`, `Acme Corp`, `example.com` (bare, behind `www.`/`docs.`/`api.`, with a fixed path word such as `/docs`, or at a fixed-vocabulary address such as `you@example.com`; never a free subdomain, path or `first.last@`), `555-0100`…`555-0199`, the RFC 5737 IPs, never-issued SSNs in the 000- and 666- areas (not 9xx-, the ITIN range), published test cards). A string is fake only if the whole string equals an `exact:` entry or fully matches a `re:` entry — each `re:` shown with its declared one-line meaning — and anything uncertain is flagged. "Jane" alone is not one.
+- **Every pattern-list hit goes to the human**, located, beside the agent's flags. Patterns are deterministic; they need no reader to surface them.
+- **The human sees no NER strings** — the agent's flags (each with its reason, merged by `file:line`), the pattern hits, the files and one counts line. That view is pasted verbatim, never summarized.
 
 #### Why nothing is remembered
 
@@ -109,14 +118,14 @@ No run keeps a list of what was accepted, and no hit is waved through because it
 - **The list drifts where nobody looks.** An allowlist grows one harmless-looking entry at a time and is never reviewed as a whole.
 - **A public string is not a public fact.** The examples here use `Jane Q. Doe`; "remember: Jane is fine" would wave through "call Jane re: biopsy" about a real Jane.
 - **It has already happened here.** The deleted knobs above (`--entities`, `--min-confidence`) were each a remembered exemption that went silently blind.
-- **Noise is handled by rules computed from the change**, never by memory. The declared fakes are the one fixed list, and they change only by PR.
+- **Noise is handled by a reader, never by memory.** The declared fakes are the one fixed list, and they change only by PR.
 
 ## The `pii-patterns` list
 
 The deterministic half beside NER: each machine's own identifiers (account handles, a real name, a vault path fragment) that must never leave in infra files. A narrow backstop for what genericizing misses, not a complete PII list; content folders are protected by never being pushed.
 
 - **Where:** `.openbrain/local/pii-patterns` in the template clone (mode 600), the copy the scanners read. Create it by hand for now; nothing seeds it yet. It is per machine: never commit it and never share it.
-- **Plain entry** — one string per line, matched as a case-insensitive substring. Right for handles: one entry catches the email, the MCP slug and the routing tag.
+- **Plain entry** — one string per line, matched as a case-insensitive substring — Unicode NFC normalization and casefolding of both sides (`josé` matches `JOSÉ`; an NFD-written entry matches NFC text) — `.openbrain/lib/template-scope.sh`'s `pii_match`, shared by the outbound scan and the incoming one. Right for handles: one entry catches the email, the MCP slug and the routing tag.
 - **`word:` entry** — `word:<string>`, matched as a whole word. **Use `word:` for short entries**: a short name as a plain substring blocks every innocent word that contains it.
 - `#` starts a comment; blank lines are ignored. Entries only ever add blocks; nothing here exempts a string.
 

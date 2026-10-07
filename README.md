@@ -134,7 +134,7 @@ Each script is idempotent — safe to re-run.
 | `/sync-places` | Discovery pass across Calendar (plus mail/Fathom signal) for physical places not yet captured; stages candidates for review |
 | `/learn-writing-style` | Derive a writing-style profile from your sent mail and Slack, then update CLAUDE.md §6 |
 | `/weekly-review` | Monday synthesis |
-| `/push-openbrain-claude-starter` | Genericize vault improvements and open a PR against the template repo |
+| `/push-openbrain-template` | Genericize vault improvements and open a PR against the template repo |
 | `/pull-openbrain-claude-starter` | Pull latest template changes into the vault interactively |
 | `/asana` | Quick view of upcoming Asana tasks with interactive check-off |
 
