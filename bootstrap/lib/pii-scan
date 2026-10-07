@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# pii-scan — local PII detector via Microsoft Presidio + spaCy.
+#
+# Thin wrapper that pins the Python interpreter to a dedicated venv so the
+# heavy NLP deps don't pollute system Python and don't break when brew
+# updates Python. The content you scan never leaves the machine, and the scan
+# path performs no network I/O (the spaCy model is pinned and verified present
+# rather than lazily downloaded).
+#
+# Usage:
+#   pii-scan FILE                           # JSON findings
+#   echo "$text" | pii-scan -                # read from stdin
+#   pii-scan --format text FILE              # human-readable
+#   pii-scan --mode review FILE              # human doc review: show everything
+#   pii-scan --selftest                      # prove the scanner really works
+#
+# There is deliberately no --entities and no --min-confidence: every one of this
+# tool's silent-blindness bugs came from a knob that narrowed a scan to nothing.
+#
+# EXIT CODES ARE THE CONTRACT:
+#   0  scanned, no findings          1  scanned, FINDINGS PRESENT
+#   2  CANNOT-CHECK (never "clean")  126/127  wrapper not executable / not installed
+# Exit 1 is the only code that means PII was seen. Treating 2 as 0 is the
+# fail-open this tool exists to prevent. `--exit-zero` collapses 1 into 0 for
+# report/interactive use; 2 is never collapsed.
+#
+# Install/repair: bootstrap/lib/install-pii-scan.sh (idempotent).
+# Full contract: bootstrap/PII-SCAN-CONTRACT.md
+# Implementation: pii-scan.py, beside this file
+
+set -euo pipefail
+
+VENV="${PII_SCAN_VENV:-$HOME/.local/share/pii-scan-venv}"
+PY="$VENV/bin/python"
+
+# Resolve symlinks so the wrapper finds pii-scan.py even when invoked through
+# a symlink in ~/.local/bin. Walked by hand rather than with `readlink -f`
+# so the wrapper does not depend on which userland's readlink is first on PATH.
+self="$0"
+while [[ -L "$self" ]]; do
+  target="$(readlink "$self")"
+  case "$target" in
+    /*) self="$target" ;;
+    *)  self="$(dirname "$self")/$target" ;;
+  esac
+done
+SCRIPT_DIR="$(cd "$(dirname "$self")" && pwd)"
+
+if [[ ! -x "$PY" ]]; then
+  cat >&2 <<EOF
+pii-scan CANNOT-CHECK: no scanner venv at $VENV
+This is NOT a clean result. Install or repair it with:
+  \$VAULT/bootstrap/lib/install-pii-scan.sh
+EOF
+  exit 2
+fi
+
+# -x is not enough: a venv whose interpreter was orphaned by a Homebrew Python
+# point-release move is still executable but dies at startup, and exec would pass
+# its exit code (1) straight through as "PII was seen".
+if ! "$PY" -c "" 2>/dev/null; then
+  echo "pii-scan CANNOT-CHECK: the venv interpreter at $PY will not run (broken venv?)" >&2
+  echo "  repair with: \$VAULT/bootstrap/lib/install-pii-scan.sh --force" >&2
+  exit 2
+fi
+
+if [[ ! -f "$SCRIPT_DIR/pii-scan.py" ]]; then
+  echo "pii-scan CANNOT-CHECK: pii-scan.py not found next to the wrapper ($SCRIPT_DIR)" >&2
+  exit 2
+fi
+
+exec "$PY" "$SCRIPT_DIR/pii-scan.py" "$@"
