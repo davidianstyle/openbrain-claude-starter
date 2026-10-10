@@ -10,23 +10,26 @@
 #   . "$FP"; typeset -f focus_brief >/dev/null 2>&1 && typeset -f flags_check >/dev/null 2>&1 || { echo "STOP: …(the same line)"; exit 1; }
 #
 # `typeset -f`, not `type`: a same-named binary on PATH must not satisfy the
-# check. Each function is a subshell `name() ( … )`, so its `exit 1` ends only
-# the function (rc 1, after printing its own `STOP: CANNOT-CHECK — …` line) and
-# its variables never leak into the caller; every call branches on the rc —
+# check. Each function is a subshell `name() ( … )`, so a failure inside it
+# ends only the function, with a nonzero rc — after its own `STOP: CANNOT-CHECK
+# — …` line, or the shell's own message for an unset variable — and its
+# variables never leak into the caller; every call branches on the rc —
 # `focus_brief || exit 1` — never bare.
 #
-# The bodies are the code those two blocks ran inline, verbatim. The functions
-# read the environment, as that code did: focus_brief runs in the caller's cwd
-# (the template clone) and umask, reads SCAN_DIR (full.diff, paths-5a.txt), BASE
-# and VAULT, and writes $SCAN_DIR/vocab.txt + brief.txt; flags_check reads
-# SCAN_DIR and writes $SCAN_DIR/flags.ok on a pass only.
+# Interface is env-based: focus_brief runs in the caller's cwd (the template
+# clone) and umask, reads SCAN_DIR (full.diff, paths-5a.txt), BASE and VAULT,
+# and writes $SCAN_DIR/vocab.txt + brief.txt; flags_check reads SCAN_DIR and
+# writes $SCAN_DIR/flags.ok on a pass only.
 #
 # Not _common.sh: that file deploys to the MCP runtime and is drift-checked
 # there. This name does not match `*-mcp.sh`, so register-mcps.sh and
 # reconcile-runtime.sh never deploy or check it. No `set -e`, no top-level
 # `exit`; bash-3.2/zsh-safe.
 
+FLAG_PASS_FAKES_REL=bootstrap/lib/pii-fakes.txt   # relative to $VAULT: the one definition — focus_brief reads it, full-diff names it on its last line
+
 focus_brief() (
+: "${SCAN_DIR:?}"; : "${BASE:?}"; [ -s "$SCAN_DIR/full.diff" ] && [ -f "$SCAN_DIR/paths-5a.txt" ] || { echo "STOP: CANNOT-CHECK — focus-brief needs $SCAN_DIR/full.diff and paths-5a.txt (its caller writes them)"; exit 1; }
 FILE_EXTS='md sh py json txt tsv csv yml yaml toml js ts mjs lst log diff patch example html css plist'   # the same literal as step 4's
 python3 - "$SCAN_DIR/full.diff" "$BASE" "$SCAN_DIR/paths-5a.txt" "$FILE_EXTS" > "$SCAN_DIR/vocab.txt" <<'PY' || { echo "STOP: CANNOT-CHECK — vocabulary builder failed (reading the tree at $BASE, or an unparseable diff)"; exit 1; }
 import re, subprocess, sys
@@ -87,7 +90,7 @@ out += ["%s:%d | (code token) %s | new: %s" % (f, n, w, w) for w, (f, n) in sort
 for i, l in enumerate(out, 1): print("v%d | %s" % (i, l))
 PY
 # the agent's brief, generated: the fakes rule is built from bootstrap/lib/pii-fakes.txt at every run, never written into this skill
-FAKES="${VAULT:?}/bootstrap/lib/pii-fakes.txt"
+FAKES="${VAULT:?}/$FLAG_PASS_FAKES_REL"
 [ -s "$FAKES" ] || { echo "STOP: CANNOT-CHECK — the declared-fakes list is missing at $FAKES; restore it from git (it ships with the scanner contract)"; exit 1; }
 python3 - "$FAKES" "$SCAN_DIR" > "$SCAN_DIR/brief.txt" <<'PY' || { cat "$SCAN_DIR/brief.txt" >&2; rm -f "$SCAN_DIR/brief.txt"; echo "STOP: CANNOT-CHECK — could not build the agent brief from $FAKES (see above)"; exit 1; }
 import re, sys

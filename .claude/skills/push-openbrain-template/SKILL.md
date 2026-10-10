@@ -621,7 +621,7 @@ focus_brief || exit 1   # the focus list and the brief, from .openbrain/lib/flag
 echo "full diff: $SCAN_DIR/full.diff  ($(wc -l < "$SCAN_DIR/full.diff" | tr -d ' ') lines)"
 echo "new-vocabulary list: $SCAN_DIR/vocab.txt  ($(wc -l < "$SCAN_DIR/vocab.txt" | tr -d ' ') entries) — the flag pass's focus list"
 echo "NER list: $SCAN_DIR/ner.txt  ($(wc -l < "$SCAN_DIR/ner.txt" | tr -d ' ') items, from step 4)"
-echo "agent brief: $SCAN_DIR/brief.txt  (fakes rule from $VAULT/bootstrap/lib/pii-fakes.txt)"
+echo "agent brief: $SCAN_DIR/brief.txt  (fakes rule from $VAULT/$FLAG_PASS_FAKES_REL)"
 ```
 
 #### 5b. Agent flag pass
