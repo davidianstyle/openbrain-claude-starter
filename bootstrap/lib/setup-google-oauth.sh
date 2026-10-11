@@ -89,4 +89,4 @@ export GOOGLE_OAUTH_CLIENT_SECRET="$CLIENT_SECRET"
 sync_google_oauth_client_json
 
 ok "Google OAuth client stored in $ENV_FILE and $TOKEN_DIR/google-oauth-client.json"
-info "Next: add individual Google accounts with ./bootstrap/lib/add-google-account.sh <email>"
+info "Next: add individual Google accounts with $(printf '%q' "$HERE/add-google-account.sh") <email>"

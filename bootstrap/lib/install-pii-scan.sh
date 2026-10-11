@@ -139,7 +139,7 @@ if [[ "$MODE" == "check" ]]; then
     finish 0
   fi
   err "pii-scan: NOT healthy — outbound sync must refuse to push on this machine"
-  err "  repair with: $HERE/install-pii-scan.sh"
+  err "  repair with: $(printf '%q' "$HERE/install-pii-scan.sh")"
   finish 2
 fi
 
@@ -270,7 +270,7 @@ fi
 
 err "pii-scan installed but verification FAILED — treat this machine as unable to scan"
 case ":$PATH:" in
-  *":$BIN_DIR:"*) err "  try: $HERE/install-pii-scan.sh --force" ;;
-  *) err "  $BIN_DIR is not on your PATH (--force will not fix that): add it to your shell profile, open a new shell, then run $HERE/install-pii-scan.sh --check" ;;
+  *":$BIN_DIR:"*) err "  try: $(printf '%q' "$HERE/install-pii-scan.sh") --force" ;;
+  *) err "  $BIN_DIR is not on your PATH (--force will not fix that): add it to your shell profile, open a new shell, then run $(printf '%q' "$HERE/install-pii-scan.sh") --check" ;;
 esac
 finish 2

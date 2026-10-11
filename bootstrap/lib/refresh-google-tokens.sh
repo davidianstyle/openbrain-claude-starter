@@ -183,7 +183,7 @@ PY
         email="$(slug_to_email "$slug")"
         warn "$slug — refresh failed: $err_msg"
         if [[ -n "$email" ]]; then
-          info "  → fix with: ./bootstrap/lib/refresh-google-tokens.sh $email"
+          info "  → fix with: $(printf '%q %q' "$HERE/refresh-google-tokens.sh" "$email")"
         fi
         fail_count=$((fail_count + 1))
       fi

@@ -185,5 +185,5 @@ env_append_between_markers \
 ok "recorded slug $SLUG in $ENV_FILE"
 
 step "Done adding $EMAIL"
-info "Next: run ./bootstrap/lib/register-mcps.sh to register the MCP servers"
-info "      or add more accounts with add-google-account.sh <other-email>"
+info "Next: run $(printf '%q' "$HERE/register-mcps.sh") to register the MCP servers"
+info "      or add more accounts with $(printf '%q' "$HERE/add-google-account.sh") <other-email>"

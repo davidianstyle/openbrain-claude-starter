@@ -28,4 +28,4 @@ env_set_var FATHOM_API_KEY "$KEY"
 chmod 600 "$ENV_FILE"
 
 ok "stored FATHOM_API_KEY in $ENV_FILE"
-info "Next: run ./bootstrap/lib/register-mcps.sh to register the fathom MCP"
+info "Next: run $(printf '%q' "$HERE/register-mcps.sh") to register the fathom MCP"

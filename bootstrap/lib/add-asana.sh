@@ -36,4 +36,4 @@ env_set_var "$VAR" "$TOKEN"
 chmod 600 "$ENV_FILE"
 
 ok "stored $VAR in $ENV_FILE"
-info "Next: run ./bootstrap/lib/register-mcps.sh to register the asana_$KIND MCP"
+info "Next: run $(printf '%q' "$HERE/register-mcps.sh") to register the asana_$KIND MCP"

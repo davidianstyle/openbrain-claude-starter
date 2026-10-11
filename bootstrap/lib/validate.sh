@@ -54,7 +54,7 @@ if [[ -f "$ENV_FILE" ]]; then
     check_warn "$ENV_FILE mode is $perms, expected 600 — run: chmod 600 $ENV_FILE"
   fi
 else
-  check_fail "$ENV_FILE not found — run setup.sh"
+  check_fail "$ENV_FILE not found — run $(printf '%q' "$REPO_ROOT/bootstrap/setup.sh")"
 fi
 
 step "Installed launchers at $LIB_DIR"
@@ -62,7 +62,7 @@ for f in asana-mcp.sh google-mcp.sh slack-mcp.sh fathom-mcp.sh _common.sh; do
   if [[ -x "$LIB_DIR/$f" ]]; then
     ok "$f"
   else
-    check_warn "$f not installed — run register-mcps.sh"
+    check_warn "$f not installed — run $(printf '%q' "$HERE/register-mcps.sh")"
   fi
 done
 
@@ -72,7 +72,7 @@ load_env || true
 if [[ -n "${GOOGLE_OAUTH_CLIENT_ID:-}" ]]; then
   ok "GOOGLE_OAUTH_CLIENT_ID set"
 else
-  check_warn "GOOGLE_OAUTH_CLIENT_ID missing — run setup-google-oauth.sh"
+  check_warn "GOOGLE_OAUTH_CLIENT_ID missing — run $(printf '%q' "$HERE/setup-google-oauth.sh")"
 fi
 
 GCOUNT=0
@@ -101,16 +101,16 @@ check_mcp_built() {
   fi
 }
 [[ -n "${ASANA_PAT_PERSONAL:-}${ASANA_PAT_WORK:-}" ]] \
-  && check_mcp_built asana "./bootstrap/lib/add-asana.sh personal|work" \
+  && check_mcp_built asana "$(printf '%q' "$HERE/add-asana.sh") personal|work" \
   || info "asana-mcp not needed (no Asana tokens configured)"
 (( GCOUNT > 0 )) \
-  && check_mcp_built google "./bootstrap/lib/add-google-account.sh <email>" \
+  && check_mcp_built google "$(printf '%q' "$HERE/add-google-account.sh") <email>" \
   || info "google-mcp not needed (no Google accounts configured)"
 (( SCOUNT > 0 )) \
-  && check_mcp_built slack "./bootstrap/lib/add-slack-workspace.sh <subdomain>" \
+  && check_mcp_built slack "$(printf '%q' "$HERE/add-slack-workspace.sh") <subdomain>" \
   || info "slack-mcp not needed (no Slack workspaces configured)"
 [[ -n "${FATHOM_API_KEY:-}" ]] \
-  && check_mcp_built fathom "./bootstrap/lib/add-fathom.sh" \
+  && check_mcp_built fathom "$(printf '%q' "$HERE/add-fathom.sh")" \
   || info "fathom-mcp not needed (no Fathom key configured)"
 
 step "Claude MCP registration"
@@ -126,7 +126,7 @@ print(len(ob))
   if (( MCP_COUNT > 0 )); then
     ok "$MCP_COUNT openbrain MCP servers registered in ~/.claude.json"
   else
-    check_warn "no openbrain MCP servers registered — run register-mcps.sh"
+    check_warn "no openbrain MCP servers registered — run $(printf '%q' "$HERE/register-mcps.sh")"
   fi
 else
   check_warn "$CLAUDE_JSON not found — start Claude Code at least once"

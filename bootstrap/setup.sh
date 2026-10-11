@@ -76,7 +76,7 @@ EOF
 if ! "$HERE/lib/install-pii-scan.sh"; then
   warn "PII scanner not installed — pushing to and pulling from the template"
   warn "will refuse until you run:"
-  warn "  ./bootstrap/lib/install-pii-scan.sh"
+  warn "  $(printf '%q' "$HERE/lib/install-pii-scan.sh")"
 fi
 
 # -----------------------------------------------------------------------------
@@ -377,9 +377,9 @@ Next steps:
            - attachment pattern: .resources/\${notename}/
 
   4. Add more accounts any time with:
-       ${_C_CYAN}./bootstrap/lib/add-google-account.sh jane@newdomain.com${_C_RESET}
-       ${_C_CYAN}./bootstrap/lib/add-slack-workspace.sh newteam${_C_RESET}
-       ${_C_CYAN}./bootstrap/lib/add-asana.sh personal${_C_RESET}
+       ${_C_CYAN}$(printf '%q' "$HERE/lib/add-google-account.sh") jane@newdomain.com${_C_RESET}
+       ${_C_CYAN}$(printf '%q' "$HERE/lib/add-slack-workspace.sh") newteam${_C_RESET}
+       ${_C_CYAN}$(printf '%q' "$HERE/lib/add-asana.sh") personal${_C_RESET}
 
 See README.md and bootstrap/README.md for troubleshooting.
 EOF

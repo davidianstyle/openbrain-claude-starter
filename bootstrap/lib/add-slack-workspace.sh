@@ -60,4 +60,4 @@ env_append_between_markers \
   "# $SLUG (env: $ENV_VAR)"
 
 ok "stored Slack token for $SLUG in $ENV_FILE"
-info "Next: run ./bootstrap/lib/register-mcps.sh to register the slack_$SLUG MCP"
+info "Next: run $(printf '%q' "$HERE/register-mcps.sh") to register the slack_$SLUG MCP"
