@@ -63,18 +63,18 @@ fi
 # -----------------------------------------------------------------------------
 step "2/10 · Installing the PII scanner"
 cat <<'EOF'
-The push and pull sync skills scan everything they publish or take in
+The push sync skill scans everything it publishes
 for personal data using a local NER model (Microsoft Presidio + spaCy).
 The text being scanned never leaves your machine. A pattern list only catches
 identifiers someone enumerated in advance; the leaks that matter are the ones
-nobody thought of. Without this scanner those skills refuse to run rather than
+nobody thought of. Without this scanner the push skill refuses to run rather than
 fall back to patterns alone.
 
 First install downloads ~430MB of model (~570MB venv) and takes a few minutes.
 Later runs are a no-op.
 EOF
 if ! "$HERE/lib/install-pii-scan.sh"; then
-  warn "PII scanner not installed — pushing to and pulling from the template"
+  warn "PII scanner not installed — pushing to the template"
   warn "will refuse until you run:"
   warn "  ./bootstrap/lib/install-pii-scan.sh"
 fi

@@ -4,6 +4,7 @@
     pii-scan [--mode gate|review] [--format json|text] FILE     (or - for stdin)
     pii-scan --selftest
     pii-scan --list-entities
+    pii-scan --serve REQ_FIFO RESP_FIFO CALLER_PID   (warm server for one caller; protocol below)
 
 EXIT CODES ARE THE CONTRACT:
     0  scanned, no findings
@@ -23,12 +24,27 @@ AND ONE INVARIANT COVERS THE REST. Before reporting any result, the exact
 configured pipeline scans a canary containing a known name and email address. If the
 configuration cannot find those, the configuration is blind and the answer is
 CANNOT-CHECK — whatever the cause, including causes nobody anticipated.
+
+--serve keeps the model loaded for one caller and scans one file per request,
+through the same scan_one() as a cold run, so the bytes are identical. Mode is
+fixed to gate/json. Protocol (bootstrap/PII-SCAN-CONTRACT.md):
+    after the model loads and one canary passes:  READY<TAB><pid><LF>
+    request  <seq><TAB><input-path><TAB><out-prefix><LF>
+    the server writes <out-prefix>.json and .err in full, closes them, then
+    reply    <seq><TAB><rc><LF>   (one os.write, < PIPE_BUF, so never half a line)
+A malformed request ends the server (exit 2); EOF on the request FIFO ends it
+(exit 0); it also ends when CALLER_PID goes away or the server's parent does
+(exit 2, polled every 0.5 s from before the FIFOs are opened, so a caller killed
+before it opened its end cannot strand the server in open()). The
+caller trusts only rc 0/1 with a non-empty .json; everything else reruns cold.
 """
 import argparse
 import io
 import json
 import os
 import sys
+import threading
+import time
 from collections import Counter
 
 EXIT_CLEAN, EXIT_FINDINGS, EXIT_CANNOT_CHECK = 0, 1, 2
@@ -46,12 +62,9 @@ CANARY = "Contact Jane Q. Doe at jane.doe@example.com, 1400 Maple Avenue."
 CANARY_REQUIRED = ("PERSON", "EMAIL_ADDRESS")
 
 # Types that fire constantly on ordinary prose and code and carry no
-# genericization signal. ORGANIZATION is here because it is by far the noisiest
-# on source: 68 of 82 findings on one shell script were things like `MAIN`,
-# `&& pwd`, `TARGET`.
-# URL is deliberately NOT here: a signed, tokenized or internal link is one of
-# the leak classes a publishing gate exists to catch, so it is shown and the
-# mandatory per-finding disposition absorbs the noise.
+# genericization signal (ORGANIZATION is the noisiest on source; measurements:
+# PII-SCAN-CONTRACT.md, "Precision"). URL is deliberately NOT here: a signed,
+# tokenized or internal link is a leak class a publishing gate exists to catch.
 GATE_NOISE = ("DATE_TIME", "NRP", "ORGANIZATION")
 
 # Two presets, no free-form tuning.
@@ -64,8 +77,8 @@ MODES = {
 }
 
 
-def cannot_check(msg):
-    print(f"pii-scan CANNOT-CHECK: {msg}", file=sys.stderr)
+def cannot_check(msg, err=None):
+    print(f"pii-scan CANNOT-CHECK: {msg}", file=err or sys.stderr)
     return EXIT_CANNOT_CHECK
 
 
@@ -150,48 +163,35 @@ def read_input(path):
         return fh.read(), path
 
 
-def run(args):
-    analyzer = build_analyzer()
-
-    if args.list_entities:
-        print("\n".join(sorted(analyzer.get_supported_entities())))
-        return EXIT_CLEAN
-
+def scan_one(analyzer, args, path, out, err):
+    """Scan one input and write its result to the given streams. Cold runs pass
+    sys.stdout/sys.stderr; --serve passes the files it opened. One code path,
+    so a warm answer is byte-identical to a cold one."""
     preset = MODES[args.mode]
     threshold, noise = preset["threshold"], preset["noise"]
 
-    if args.selftest:
-        why = canary_ok(analyzer, threshold, noise)
-        if why:
-            return cannot_check(why)
-        print(f"pii-scan selftest OK — model {SPACY_MODEL}, mode {args.mode}")
-        return EXIT_CLEAN
-
-    if not args.input:
-        return cannot_check("no input given (pass a file path or '-' for stdin)")
-
     try:
-        text, source = read_input(args.input)
+        text, source = read_input(path)
     except OSError as exc:
-        return cannot_check(f"could not read input: {exc}")
+        return cannot_check(f"could not read input: {exc}", err)
     except UnicodeDecodeError as exc:
-        return cannot_check(f"input is not valid UTF-8 text: {exc}")
+        return cannot_check(f"input is not valid UTF-8 text: {exc}", err)
 
     if "\x00" in text:
         return cannot_check(
             f"input {source} contains NUL bytes — it is almost certainly UTF-16 "
             f"or binary, not UTF-8 text. It would decode into gibberish that "
-            f"scans as clean while hiding real identifiers.")
+            f"scans as clean while hiding real identifiers.", err)
 
     if not text.strip() and not args.allow_empty:
         return cannot_check(
             f"input {source} is empty — nothing was scanned. An empty read "
             f"usually means the producer failed (bad git ref, mis-quoted path). "
-            f"Pass --allow-empty if emptiness is genuinely expected.")
+            f"Pass --allow-empty if emptiness is genuinely expected.", err)
 
     why = canary_ok(analyzer, threshold, noise)
     if why:
-        return cannot_check(why)
+        return cannot_check(why, err)
 
     findings = scan(analyzer, text, threshold, noise)
     summary = Counter(f["entity_type"] for f in findings)
@@ -200,25 +200,122 @@ def run(args):
         json.dump({"source": source, "char_count": len(text),
                    "model": SPACY_MODEL, "mode": args.mode,
                    "findings": findings, "summary": dict(summary)},
-                  sys.stdout, indent=2)
-        sys.stdout.write("\n")
+                  out, indent=2)
+        out.write("\n")
     else:
-        print(f"PII scan: {source} ({len(text)} chars, {SPACY_MODEL}, mode {args.mode})")
+        print(f"PII scan: {source} ({len(text)} chars, {SPACY_MODEL}, mode {args.mode})", file=out)
         if not findings:
-            print("  no findings")
+            print("  no findings", file=out)
         else:
-            print(f"  {len(findings)} findings:")
+            print(f"  {len(findings)} findings:", file=out)
             for t, c in summary.most_common():
-                print(f"    {c:>3}x {t}")
-            print("\n  detail:")
+                print(f"    {c:>3}x {t}", file=out)
+            print("\n  detail:", file=out)
             for f in findings:
                 snip = f["text"].replace("\n", " ")
                 snip = snip[:57] + "..." if len(snip) > 60 else snip
                 print(f"    [{f['score']:.2f}] {f['entity_type']:<20} "
-                      f"@{f['start']:>5}: {snip}")
-    sys.stdout.flush()
+                      f"@{f['start']:>5}: {snip}", file=out)
+    out.flush()
 
     return EXIT_FINDINGS if (findings and not args.exit_zero) else EXIT_CLEAN
+
+
+def run(args):
+    analyzer = build_analyzer()
+
+    if args.list_entities:
+        print("\n".join(sorted(analyzer.get_supported_entities())))
+        return EXIT_CLEAN
+
+    if args.selftest:
+        preset = MODES[args.mode]
+        why = canary_ok(analyzer, preset["threshold"], preset["noise"])
+        if why:
+            return cannot_check(why)
+        print(f"pii-scan selftest OK — model {SPACY_MODEL}, mode {args.mode}")
+        return EXIT_CLEAN
+
+    if not args.input:
+        return cannot_check("no input given (pass a file path or '-' for stdin)")
+
+    return scan_one(analyzer, args, args.input, sys.stdout, sys.stderr)
+
+
+def _open_out(name):
+    # mode 0600 whatever the umask; truncate, as a shell `>` would
+    fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    return io.open(fd, "w", encoding="utf-8", errors="backslashreplace")
+
+
+def serve(args):
+    """Warm server for exactly one caller. Strict lock-step: one request in,
+    one reply out. Anything off ends the server; the caller then scans cold."""
+    req_path, resp_path, caller = args.serve
+    parent = os.getppid()   # first, before the model import: an orphan must not outlive its caller
+    if not caller.isdigit() or not caller.isascii() or int(caller) <= 1:
+        return cannot_check(f"--serve: CALLER_PID must be a pid, got {caller!r}")
+    caller = int(caller)
+
+    def caller_gone():
+        if os.getppid() != parent or parent == 1:
+            return True
+        try:
+            os.kill(caller, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:      # exists, owned by someone else: a reused pid, but not proof of absence
+            return False
+        return False
+
+    def watchdog():
+        while True:
+            if caller_gone():
+                os._exit(EXIT_CANNOT_CHECK)
+            time.sleep(0.5)
+    if caller_gone():                # the caller died before we even got here
+        return cannot_check("--serve: the caller is already gone")
+    threading.Thread(target=watchdog, daemon=True).start()   # before the blocking FIFO opens below
+
+    req = open(req_path, "rb")
+    resp = os.open(resp_path, os.O_WRONLY)
+
+    def reply(line):
+        data = line.encode("ascii")
+        if len(data) >= 512 or os.write(resp, data) != len(data):
+            raise RuntimeError("could not send a whole reply line")
+
+    analyzer = build_analyzer()
+    preset = MODES[args.mode]
+    why = canary_ok(analyzer, preset["threshold"], preset["noise"])
+    if why:
+        return cannot_check(why)
+    reply(f"READY\t{os.getpid()}\n")
+
+    while True:
+        line = req.readline()
+        if not line:
+            return EXIT_CLEAN               # the caller closed its end
+        try:
+            fields = line.decode("utf-8").split("\t")
+        except UnicodeDecodeError:
+            fields = []
+        if (len(fields) != 3 or not line.endswith(b"\n") or not fields[0].isdigit()
+                or not fields[0].isascii() or "\r" in line.decode("utf-8", "replace")
+                or fields[1] in ("", "-") or fields[2] == "\n"):
+            return cannot_check(f"malformed request {line[:200]!r}")
+        seq, path, prefix = fields[0], fields[1], fields[2][:-1]
+        rc = EXIT_CANNOT_CHECK
+        try:
+            with _open_out(prefix + ".json") as out, _open_out(prefix + ".err") as err:
+                try:
+                    rc = scan_one(analyzer, args, path, out, err)
+                except BaseException as exc:    # per request, as main() does for a cold run
+                    rc = cannot_check(f"{type(exc).__name__}: {exc}", err)
+        except Exception as exc:              # the outputs could not be written or closed
+            print(f"pii-scan --serve: request {seq}: {type(exc).__name__}: {exc}", file=sys.stderr)
+            rc = EXIT_CANNOT_CHECK
+        reply(f"{seq}\t{rc}\n")
 
 
 def main():
@@ -236,13 +333,23 @@ def main():
     p.add_argument("--selftest", action="store_true",
                    help="Verify the pipeline detects known PII; exit 0 or 2.")
     p.add_argument("--list-entities", action="store_true")
+    p.add_argument("--serve", nargs=3, metavar=("REQ_FIFO", "RESP_FIFO", "CALLER_PID"),
+                   help="Warm server for one caller over two FIFOs; gate/json only.")
     args = p.parse_args()
+    if args.serve:
+        clash = [f for f, on in (("--selftest", args.selftest), ("--list-entities", args.list_entities),
+                                 ("--exit-zero", args.exit_zero), ("--allow-empty", args.allow_empty),
+                                 ("an input path", args.input is not None),
+                                 ("--mode other than gate", args.mode != "gate"),
+                                 ("--format other than json", args.format != "json")) if on]
+        if clash:
+            p.error("--serve takes no " + ", ".join(clash))
 
     # Anything unanticipated is CANNOT-CHECK. Without this an uncaught error
     # exits 1, which the contract defines as "PII was seen" — a scan that never
     # ran would be reported as a finding, or worse, acted on as a normal result.
     try:
-        rc = run(args)
+        rc = serve(args) if args.serve else run(args)
     except SystemExit:
         raise
     except BaseException as exc:
