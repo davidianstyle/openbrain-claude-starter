@@ -158,7 +158,7 @@ pii_patterns() {
 }
 
 # pii_match <plain|word> <entries-file> <text-file> — the ONE matcher for pii-patterns entries (push's step-4 scan and pull's
-# incoming scan). Both sides are Unicode-normalized (NFC) and casefolded before comparing, so `josé` matches `JOSÉ` and an
+# incoming scan). Both sides are Unicode-normalized (NFC) and casefolded before comparing, so `café` matches `CAFÉ` and an
 # NFD-written entry matches NFC text; `LC_ALL=C grep -i` folds ASCII only and missed both. `plain`: substring; `word`: whole
 # word (no letter, digit or `_` either side). Text is read as bytes, one line per newline; a line that is not UTF-8 is
 # decoded with replacement, so its ASCII still matches. Prints `<line>:<text>` per matching line (grep -n shape).
