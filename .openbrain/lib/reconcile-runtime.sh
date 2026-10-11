@@ -160,9 +160,13 @@ if [ "$launcher_drift" = 1 ]; then
   if [ ! -f "$SCAN" ]; then
     warn "scan-secrets.sh not present — deploy-path secret scan SKIPPED."
   elif [ "${#scan_files[@]}" -gt 0 ]; then
-    if ! bash "$SCAN" ${scan_files[@]+"${scan_files[@]}"}; then
+    src=0; bash "$SCAN" ${scan_files[@]+"${scan_files[@]}"} || src=$?
+    if [ "$src" -eq 1 ]; then
       warn "deploy ABORTED: a launcher source contains a secret literal (above)."
       warn "Move it to $ENV_FILE and reference it via an env var, then re-run."
+      exit 1
+    elif [ "$src" -ne 0 ]; then
+      warn "deploy ABORTED: the deploy-path secret scan could not complete (exit $src, above) — nothing was deployed."
       exit 1
     fi
   fi
