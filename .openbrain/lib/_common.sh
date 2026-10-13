@@ -109,44 +109,45 @@ require_env() {
   [[ -n "${!var:-}" ]] || die "$var not set in $ENV_FILE"
 }
 
-# Auto-clone and build an MCP server source repo if its built artifact is
-# missing. Launch-time fallback for the bootstrap-time install — covers the
-# case where dist/ was deleted, the user skipped bootstrap, or a new machine
-# pulled the vault without re-running setup.
-#
-# Usage: ensure_mcp_server <name>-mcp
-#   e.g. ensure_mcp_server google-mcp
-#   → expects $HOME/Code/<name>-mcp/dist/index.js
-#   → if missing, clones $OPENBRAIN_MCP_REPO_OWNER/<name>-mcp (default
-#     davidianstyle) into $HOME/Code/, runs npm install + npm run build
-ensure_mcp_server() {
-  local name="$1"
-  local owner="${OPENBRAIN_MCP_REPO_OWNER:-davidianstyle}"
-  local src_dir="$HOME/Code/$name"
-  local dist="$src_dir/dist/index.js"
+# --- declared launchers ------------------------------------------------------
+# A launcher that carries a `# openbrain-mcp:` line resolves its source location,
+# URL and shape through _mcp-decl.sh (mcp_get / mcp_shape), and installs itself
+# via that file's ensure_mcp_server -- the ONE install path, shared with setup-time
+# `add-*.sh` calls (bootstrap/lib/common.sh sources the installed copy).
+# shellcheck source=_mcp-decl.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_mcp-decl.sh"
 
-  [[ -f "$dist" ]] && return 0
+# The launcher is the bottom of the source stack (the script Claude Code exec'd),
+# however deeply these helpers are nested.
+_declaring_launcher(){ printf '%s' "${BASH_SOURCE[${#BASH_SOURCE[@]}-1]}"; }
 
-  echo "openbrain mcp: $name not built at $dist — auto-installing..." >&2
+declared_entry(){ mcp_entry "$(_declaring_launcher)"; }
 
-  if [[ ! -d "$src_dir" ]]; then
-    mkdir -p "$HOME/Code"
-    echo "openbrain mcp: cloning $owner/$name → $src_dir" >&2
-    if command -v gh >/dev/null 2>&1; then
-      gh repo clone "$owner/$name" "$src_dir" >&2 \
-        || die "failed to clone $owner/$name via gh (check 'gh auth status' or set OPENBRAIN_MCP_REPO_OWNER)"
-    else
-      git clone "https://github.com/$owner/$name.git" "$src_dir" >&2 \
-        || die "failed to clone https://github.com/$owner/$name.git (install gh for private-repo auth)"
-    fi
-  fi
+# _check_declared <launcher> : exactly one declaration line and a valid update mode in the
+# policy file, or die — an invalid value stops the launcher, never a silent default.
+_check_declared(){
+  local m
+  [[ "$(decl_count "$1")" == 1 ]] || die "$(basename "$1"): needs exactly one '# openbrain-mcp:' line"
+  m="$(mcp_update_mode "$1")"; [[ "$m" != INVALID:* ]] || die "$(basename "$1"): ${m#INVALID:}"
+}
 
-  echo "openbrain mcp: building $name (npm install + npm run build)..." >&2
-  ( cd "$src_dir" && npm install --ignore-scripts && npm run build ) >&2 \
-    || die "failed to build $name — run 'cd $src_dir && npm install && npm run build' manually"
-
-  [[ -f "$dist" ]] || die "$name built but $dist still missing"
-  echo "openbrain mcp: $name ready at $dist" >&2
+# npm-shaped launchers: exec the server on this machine's channel (_mcp-decl.sh):
+#   stable -> npx --yes <pkg>@<last-applied version> [args...]
+#   canary -> node <src>/<sub>/<entry> [args...], lazily cloned from url= + built by
+#             ensure_mcp_server (_mcp-decl.sh: tests gate, last-good dist,
+#             dist/.built-from, build lock). Existence-only at launch; freshness
+#             is the checker's job. An invalid channel dies here — never a
+#             silent default.
+# Arguments are passed to the server unchanged on either channel, e.g.
+# `exec_declared_npm --slug "$SLUG"` for a server that takes its account as a flag.
+exec_declared_npm(){
+  local l ch; l="$(_declaring_launcher)"; _check_declared "$l"
+  ch="$(mcp_channel "$l")"
+  case "$ch" in
+    stable) exec npx --yes "$(mcp_npm_spec "$l")" "$@" ;;
+    canary) ensure_mcp_server; exec node "$(mcp_entry "$l")" "$@" ;;
+    *)      die "$(basename "$l"): ${ch#INVALID:}" ;;
+  esac
 }
 
 ensure_node_on_path

@@ -7,6 +7,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "$HERE/common.sh"
 
+ensure_node   # the build below needs node + npm
 ensure_mcp_server fathom
 
 step "Fathom API key"

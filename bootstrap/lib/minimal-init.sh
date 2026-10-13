@@ -7,7 +7,7 @@
 # davidianstyle MCPs needs.
 #
 # Called by:
-#   - OpenBrain's own setup.sh (step 4 of the wizard, in place of the
+#   - OpenBrain's own setup.sh (step 5 of the wizard, in place of the
 #     inlined logic that previously lived there)
 #   - External consumers (e.g. a separate project's bootstrap) that
 #     need the MCP-installer machinery without the rest of the vault
@@ -18,7 +18,8 @@
 # Idempotent: re-running won't clobber an existing $ENV_FILE; launcher
 # script copies are unconditional overwrites from the repo's .openbrain/lib/
 # managed launcher set (so a re-run picks up upstream changes). Only that set
-# — *-mcp.sh + _common.sh, per managed_launchers in common.sh — is copied;
+# — *-mcp.sh + _common.sh + _mcp-decl.sh + mcp-local-build.sh, per
+# managed_launchers in common.sh — is copied;
 # other .openbrain/lib scripts are vault/clone-tier tooling that runs from
 # the repo and must not pollute LIB_DIR.
 

@@ -58,7 +58,7 @@ else
 fi
 
 step "Installed launchers at $LIB_DIR"
-for f in asana-mcp.sh google-mcp.sh slack-mcp.sh fathom-mcp.sh _common.sh; do
+for f in asana-mcp.sh google-mcp.sh slack-mcp.sh fathom-mcp.sh _common.sh _mcp-decl.sh mcp-local-build.sh; do
   if [[ -x "$LIB_DIR/$f" ]]; then
     ok "$f"
   else
@@ -89,29 +89,86 @@ info "Slack workspaces with tokens: $SCOUNT"
 [[ -n "${ASANA_PAT_WORK:-}" ]]     && ok "Asana work token set"     || info "no Asana work token (optional)"
 [[ -n "${FATHOM_API_KEY:-}" ]]     && ok "Fathom API key set"       || info "no Fathom API key (optional)"
 
+if [[ -n "${OPENBRAIN_MCP_REPO_OWNER:-}" ]]; then
+  check_warn "OPENBRAIN_MCP_REPO_OWNER is set but no longer read — set owner= in ~/.config/openbrain/mcp-config instead"
+fi
+
 step "MCP server source repos"
-check_mcp_built() {
-  # check_mcp_built <name> <add-script>
-  local name="$1" add_script="$2"
-  local dist="$MCP_SRC_ROOT/${name}-mcp/dist/index.js"
-  if [[ -f "$dist" ]]; then
-    ok "${name}-mcp built ($dist)"
-  else
-    check_warn "${name}-mcp not built at $dist — re-run $add_script"
-  fi
-}
-[[ -n "${ASANA_PAT_PERSONAL:-}${ASANA_PAT_WORK:-}" ]] \
-  && check_mcp_built asana "./bootstrap/lib/add-asana.sh personal|work" \
-  || info "asana-mcp not needed (no Asana tokens configured)"
-(( GCOUNT > 0 )) \
-  && check_mcp_built google "./bootstrap/lib/add-google-account.sh <email>" \
-  || info "google-mcp not needed (no Google accounts configured)"
-(( SCOUNT > 0 )) \
-  && check_mcp_built slack "./bootstrap/lib/add-slack-workspace.sh <subdomain>" \
-  || info "slack-mcp not needed (no Slack workspaces configured)"
-[[ -n "${FATHOM_API_KEY:-}" ]] \
-  && check_mcp_built fathom "./bootstrap/lib/add-fathom.sh" \
-  || info "fathom-mcp not needed (no Fathom key configured)"
+if [[ ! -f "$LIB_DIR/_mcp-decl.sh" ]]; then
+  check_warn "_mcp-decl.sh not installed at $LIB_DIR — run register-mcps.sh"
+elif ! ( source "$LIB_DIR/_mcp-decl.sh"; declare -F mcp_get >/dev/null && declare -F mcp_root >/dev/null \
+         && declare -F mcp_entry >/dev/null && declare -F mcp_get >/dev/null && declare -F _mcp_url_eq >/dev/null && declare -F fork_is_redundant >/dev/null ); then
+  # Distinct CANNOT-CHECK line — never a silent return: an installed _mcp-decl.sh
+  # missing the resolver functions (an older copy than this checker expects) must
+  # not be treated as "nothing to check" or crash mid-check with "command not found".
+  check_warn "CANNOT-CHECK: installed _mcp-decl.sh at $LIB_DIR is missing resolver functions — runtime not deployed yet — run .openbrain/lib/reconcile-runtime.sh --apply"
+else
+  # shellcheck source=/dev/null
+  source "$LIB_DIR/_mcp-decl.sh"
+  check_mcp_built() {
+    # check_mcp_built <launcher-basename-no-.sh> <add-script>   — always returns 0, so a
+    # caller's `cond && check_mcp_built … || info "not needed"` can never misreport.
+    # Separate `local` statements: bash 3.2 expands every word of ONE `local` before
+    # assigning any, so l="$LIB_DIR/${name}.sh" on the same line would see an empty name.
+    local name="$1" add_script="$2"
+    local l="$LIB_DIR/${name}.sh" entry dir want actual want_fork actual_fork
+    if [[ ! -f "$l" ]]; then check_warn "$name.sh not installed — run register-mcps.sh"; return 0; fi
+    entry="$(mcp_entry "$l")"
+    case "$entry" in
+      INVALID:*) check_warn "$name: ${entry#INVALID:}"; return 0 ;;
+    esac
+    if [[ -f "$entry" ]]; then
+      ok "$name built ($entry)"
+    else
+      check_warn "$name not built at $entry — re-run $add_script"
+    fi
+    # Origin-vs-resolved-url (URL-normalized), same comparison as check-updates.sh:
+    # changing owner=/.url=/.fork= in mcp-config on an EXISTING clone otherwise
+    # does nothing, silently — only a fresh clone would ever pick it up. Same for
+    # a resolved .fork= vs the actual 'fork' remote. Report only — never re-point.
+    dir="$(mcp_root "$l")"
+    case "$dir" in INVALID:*) check_warn "$name: ${dir#INVALID:}"; return 0 ;; esac
+    [[ -d "$dir/.git" ]] || return 0   # no clone yet: the "not built" warning above already says so
+    want="$(mcp_get "$l" url)"
+    case "$want" in
+      INVALID:*) check_warn "$name: ${want#INVALID:}" ;;
+      "") : ;;
+      *)
+        if actual="$(git -C "$dir" remote get-url origin 2>&1)"; then
+          _mcp_url_eq "$actual" "$want" \
+            || check_warn "$name origin is $actual, resolved declaration says $want — re-point: git -C $dir remote set-url origin $want — or, if that origin is intentional, set $name.url= (or owner=) in $MCP_CONFIG_FILE"
+        else
+          check_warn "CANNOT-CHECK: $name origin not compared — 'git remote get-url origin' failed in $dir: $actual"
+        fi ;;
+    esac
+    want_fork="$(mcp_get "$l" fork)"
+    if fork_is_redundant "$l"; then want_fork=""; fi   # .fork= equal to origin: re-parented, no fork remote to compare
+    case "$want_fork" in
+      INVALID:*) check_warn "$name: ${want_fork#INVALID:}" ;;
+      "") : ;;
+      *)
+        if actual_fork="$(git -C "$dir" remote get-url fork 2>&1)"; then
+          _mcp_url_eq "$actual_fork" "$want_fork" \
+            || check_warn "$name fork remote is $actual_fork, resolved .fork= says $want_fork — re-point: git -C $dir remote set-url fork $want_fork"
+        else
+          check_warn "CANNOT-CHECK: $name fork remote not compared — 'git remote get-url fork' failed in $dir: $actual_fork"
+        fi ;;
+    esac
+    return 0
+  }
+  if [[ -n "${ASANA_PAT_PERSONAL:-}${ASANA_PAT_WORK:-}" ]]; then
+    check_mcp_built asana-mcp "./bootstrap/lib/add-asana.sh personal|work"
+  else info "asana-mcp not needed (no Asana tokens configured)"; fi
+  if (( GCOUNT > 0 )); then
+    check_mcp_built google-mcp "./bootstrap/lib/add-google-account.sh <email>"
+  else info "google-mcp not needed (no Google accounts configured)"; fi
+  if (( SCOUNT > 0 )); then
+    check_mcp_built slack-mcp "./bootstrap/lib/add-slack-workspace.sh <subdomain>"
+  else info "slack-mcp not needed (no Slack workspaces configured)"; fi
+  if [[ -n "${FATHOM_API_KEY:-}" ]]; then
+    check_mcp_built fathom-mcp "./bootstrap/lib/add-fathom.sh"
+  else info "fathom-mcp not needed (no Fathom key configured)"; fi
+fi
 
 step "Claude MCP registration"
 CLAUDE_JSON="$HOME/.claude.json"
