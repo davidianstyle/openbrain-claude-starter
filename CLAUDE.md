@@ -199,6 +199,16 @@ Re-run the incremental add script from the vault root:
 
 Each script is idempotent — safe to re-run.
 
+### MCP sync model
+
+Hand-managed third-party MCP servers (a clone at `<root>/<name>` — `root=` in `~/.config/openbrain/mcp-config`, default `~/Code` — launcher at `~/.config/openbrain/lib/<name>.sh`, remotes `origin` = upstream and `fork` = your own staging fork, declared per machine as `<launcher>.fork=` in `mcp-config`) follow their own git-native line, separate from the template's.
+
+Work flows clone → `fork/feat/<slug>` (staging; every machine picks it up) → upstream PR (release, same branch as PR head). `local-build` is **derived, never authored**: `origin/main` + every live `fork/feat/*` merged `--no-ff`, then `dist` built with a `dist/.built-from` provenance marker. **`feat/` is an enrollment namespace, not a naming taxonomy** — bugfixes go there too, and a branch under any other prefix is *silently* absent from the build. Never widen that glob.
+
+Produce side: `/push-mcp-change`. Consume side: `/brain-update-check` (detects; applies via `.openbrain/lib/check-updates.sh --apply <name>`, engine `.openbrain/lib/mcp-local-build.sh`). There is deliberately no `pull-mcp-change` — applying is one deterministic command with no decisions in it. Any MCP change needs a **Claude Code restart** to take effect.
+
+Every `*-mcp.sh` launcher declares its shape in one line — `# openbrain-mcp: shape=fork|checkout|npm ...` (grammar + config resolver: `.openbrain/lib/_mcp-decl.sh`) — and the launcher runs from that declaration, so what is checked is what runs. Update policy is per machine, per MCP: `<launcher>.update=auto|ask` lines in `~/.config/openbrain/mcp-config` (`<launcher>` = the launcher's basename without `.sh`, e.g. `asana-mcp`; absent → `ask`). `ask` reports and offers, but a go applies whatever is live at apply time (`origin/main` + every live `fork/feat/*`), even changes pushed after the offer; `auto` lets `/brain-update-check` apply it when the engine's test gate passes. Nothing is inferred — canary does not imply auto, and an invalid value stops the launcher rather than silently defaulting. `shape=npm` launchers additionally take a `stable|canary` channel (same file: `channel=` machine default, or `<launcher>.channel=` per-MCP) — `stable` runs the published npm package pinned to the last-applied version; `canary` runs from a source checkout, built by the same engine.
+
 ## 12. People data model
 
 - **MOC:** `+ Spaces/People.md` — curated grouping by relationship context.

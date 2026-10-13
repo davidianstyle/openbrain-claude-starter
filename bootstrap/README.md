@@ -189,6 +189,10 @@ If a specific server stays red:
 2. Check that the token file(s) exist at the expected path
 3. Re-run `add-google-account.sh <email>` to refresh credentials
 
+### A launcher exits immediately, or the update check says `undeclared` / `cannot-check`
+
+Every `*-mcp.sh` launcher needs one `# openbrain-mcp: shape=…` declaration line. An `undeclared` installed launcher right after a pull usually means the runtime wasn't redeployed: run `bash .openbrain/lib/reconcile-runtime.sh --apply` from the vault — never edit the installed copy in `~/.config/openbrain/lib/`, which the next redeploy overwrites. If the vault's own launcher lacks the line, add it there (grammar: `.openbrain/lib/_mcp-decl.sh`), then redeploy. A launcher also refuses to start on an invalid value in `~/.config/openbrain/mcp-config` (for example a misspelled channel, an update mode other than `auto`/`ask`, or a line not written as `key=value`, such as `root: /x`; an inline `# comment` after whitespace is fine) — fix the value and restart Claude Code. `bash .openbrain/lib/check-updates.sh --check` prints a one-line summary (nothing when clean); `--report` prints the full report with each finding's fix.
+
 ### "npx not found" when a launcher runs
 
 The launchers source `_common.sh` which tries to find Node in common locations (Homebrew, asdf, nvm). If it still can't find it, the fastest fix is:

@@ -137,6 +137,8 @@ Each script is idempotent — safe to re-run.
 | `/push-openbrain-template` | Genericize vault improvements and open a PR against the template repo |
 | `/pull-openbrain-template` | Pull the template's `main` into the vault: per-file merge from the last applied marker (`.openbrain/local/taken.tsv`), incoming content scanned before it lands |
 | `/asana` | Quick view of upcoming Asana tasks with interactive check-off |
+| `/push-mcp-change` | Stage a change to a hand-managed MCP fork, and optionally open its upstream PR |
+| `/brain-update-check` | Report which MCP servers have updates waiting (upstream moved, dist stale, npm publish, an open session on an old build), auto-apply what the per-MCP `auto\|ask` policy allows, and offer to apply the rest — read-only beyond that until you say go |
 
 Skills are markdown procedures — Claude reads the SKILL.md and performs the steps. No code execution.
 
@@ -150,6 +152,39 @@ One stdio MCP server per (service × account) pair, so routing is explicit:
 - **Fathom** (`fathom-mcp`) — single instance
 
 All launched via `~/.config/openbrain/lib/*-mcp.sh` wrappers that source `~/.config/openbrain/.env`.
+
+### Keeping MCP servers current
+
+- **Every launcher declares what it runs** in one line: `# openbrain-mcp: shape=fork|checkout|npm dir=<relative-to-root> …`. The launcher runs from that line (cloning and building on first launch if needed), and the update checker checks against it. A registered server with no declaration is reported, never guessed at.
+- **Layout**: a relative `dir=`/`src=` is rooted at `root=` in `~/.config/openbrain/mcp-config` (default `~/Code`). `owner=` re-parents every declared `github.com/<owner>/<repo>` origin to your own fork/mirror; a per-MCP `<launcher>.url=`, `<launcher>.fork=`, `<launcher>.dir=`, or `<launcher>.branch=` overrides just that one server. All one-off machine choices — the tracked declaration always carries the upstream default.
+- **Session start** runs a fast offline check and prints one line only when something needs attention (a stale build, uncommitted changes, a session still on an old build). **`/brain-update-check`** does the online check against GitHub and npm.
+- **Update policy**, per server, in `~/.config/openbrain/mcp-config`: `ask` (default — report and offer, apply on your go) or `auto` (e.g. `google-mcp.update=auto` — `/brain-update-check` applies it when its tests pass). Every build from source must pass the server's tests and keeps the last good build if it fails. To revert a server, build an earlier commit in its checkout (`git checkout <sha> && npm ci --ignore-scripts && npm run build && git rev-parse HEAD > dist/.built-from`). The checker then reports it as `off-branch` (plus `source-behind` for a checkout, or `dist-stale` for a fork), and `auto` leaves it alone. To go forward again, run `git switch <branch>` in the checkout (`main`, or the branch it tracks; `local-build` for a fork), then `--apply` it. A plain npm server on the `stable` channel has no test gate — `auto` just moves it to the latest published version.
+- **Channels** for npm servers whose source repo you also have: `stable` (the published package, default) or `canary` (run from the source checkout). Set per machine in the same file. A misspelled value stops that server from starting rather than being guessed at.
+- **Restart Claude Code to apply** any update — running sessions keep the build they started with.
+
+### Adding your own MCP
+
+A server that isn't one of the supported services above runs through the same launcher, build and update machinery; you set it up by hand.
+
+1. **Keep its source in a git repo**, on GitHub or local: `git init`, a `.gitignore` with `node_modules/` and `dist/`, and a commit on `main` (or declare `branch=`). It needs a `package.json` whose `build` script writes `dist/`; a `test` script, if present, gates every build. **Only committed code is built**: the build runs in its own clone, the `dist/.built-from` provenance stamp is the source's `HEAD`, and the update checks compare commits. After you commit a change, `/brain-update-check` reports it and `--apply` builds it.
+2. **Write a launcher** at `.openbrain/lib/<name>-mcp.sh` with one declaration line:
+
+   ```bash
+   #!/usr/bin/env bash
+   # openbrain-mcp: shape=checkout dir=my-mcp url=file:///path/to/my-mcp
+   set -euo pipefail
+   source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+   require_env MY_MCP_API_KEY
+   export MY_MCP_API_KEY
+   ensure_mcp_server
+   exec node "$(declared_entry)"
+   ```
+
+   `dir=` is where the build clone lives (under `root=`, default `~/Code`), not your source folder. `url=` is `https://…` or `file:///absolute/path` to the repo (a space in that path is written `%20`: a declaration value can't contain spaces). Add `sub=packages/<pkg>` for a package inside a monorepo, and `entry=` when the built file isn't `dist/index.js` (it must stay under `dist/`). The grammar is in `.openbrain/lib/_mcp-decl.sh`; `fathom-mcp.sh` is a shipped launcher of the same shape.
+3. **An absolute `file://` path works on one machine only.** Other machines that share this vault set `<name>-mcp.url=` in their own `~/.config/openbrain/mcp-config`. List the launcher in `.openbrain/template-ignore` to keep it out of template pushes.
+4. **Secrets go in `~/.config/openbrain/.env`**, read with `require_env` + `export` as above. Never put them in the launcher or in its registration args (stored as plain text in `~/.claude.json`).
+5. **Deploy and register it by hand.** `bash bootstrap/lib/register-mcps.sh` copies the launcher to `~/.config/openbrain/lib/`, but it only registers the supported services, so register yours yourself: `claude mcp add -s user <key> -- ~/.config/openbrain/lib/<name>-mcp.sh [args]`. **Don't pick a managed key:** `register-mcps.sh` deletes any entry named `fathom` or starting with `asana_`, `gmail_`, `gcal_`, `gmeet_`, `gdrive_`, `gslides_`, `gtasks_`, `mstodo_`, `google_` or `slack_` whose launcher is in that folder, and re-creates only the ones it knows.
+6. **Restart Claude Code.** The first launch clones and builds it, and `/brain-update-check` covers it from then on.
 
 ---
 
