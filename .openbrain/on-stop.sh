@@ -6,14 +6,21 @@
 
 set -uo pipefail
 
-VAULT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$VAULT" || exit 0
-
 TS="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
+log() { printf '[on-stop %s] %s\n' "$TS" "$*" >&2; }
+
+# Never run against the wrong directory, and never skip silently. A failed
+# resolution leaves VAULT empty, and `cd ""` succeeds in place — this hook
+# would then commit in whatever cwd it inherited. A Stop hook's plain stdout
+# reaches no one; a JSON systemMessage is shown to the user.
+VAULT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" && [[ -n "$VAULT" ]] && cd "$VAULT" || {
+  p="${VAULT:-${BASH_SOURCE[0]%/*}/..}"; p="${p//\\/\\\\}"; p="${p//\"/\\\"}"; p="${p//$'\n'/ }"
+  printf '{"systemMessage": "[on-stop] auto-commit SKIPPED — cannot enter the vault (%s); nothing was committed or pushed"}\n' "$p"
+  exit 0
+}
+
 INBOX="$VAULT/+ Inbox"
 LOG_FILE="${TMPDIR:-/tmp}/openbrain-on-stop.log"
-
-log() { printf '[on-stop %s] %s\n' "$TS" "$*" >&2; }
 
 # -----------------------------------------------------------------------------
 # Step 1: regenerate Home.md MOC index
