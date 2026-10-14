@@ -5,9 +5,6 @@
 
 set -uo pipefail
 
-VAULT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$VAULT" || exit 0
-
 log() { printf '[on-start] %s\n' "$*" >&2; }
 
 # Warnings go to STDOUT, not stderr. Empirically verified (2026-07-08): a
@@ -16,6 +13,13 @@ log() { printf '[on-start] %s\n' "$*" >&2; }
 # warning on stderr is structurally silent. Routine progress notes stay on
 # stderr (log); anything that must change the session's behavior uses warn.
 warn() { printf '[on-start] %s\n' "$*"; }
+
+# Never quit silently. A failed resolution leaves VAULT empty, and `cd ""`
+# succeeds in place, so both the resolution and the cd are guarded.
+VAULT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" && [[ -n "$VAULT" ]] && cd "$VAULT" || {
+  warn "session-start checks SKIPPED — cannot enter the vault (${VAULT:-${BASH_SOURCE[0]%/*}/..}); nothing was checked"
+  exit 0
+}
 
 # First error:/fatal: line of a git transcript, else its last line — the last
 # line of a multi-line git error is often a fragment ("and the repository
