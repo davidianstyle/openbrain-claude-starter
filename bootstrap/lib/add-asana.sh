@@ -14,6 +14,7 @@ case "$KIND" in
   *) die "expected personal|work, got: $KIND" ;;
 esac
 
+ensure_node   # the build below needs node + npm
 ensure_mcp_server asana
 
 step "Asana personal access token ($KIND)"

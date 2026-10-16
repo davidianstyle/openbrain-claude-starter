@@ -14,7 +14,7 @@
 # intact everywhere except that one audited subprocess.
 #
 # Loci (what a PULL can change):
-#   - MCP launchers: $VAULT/.openbrain/lib/{*-mcp.sh,_common.sh} → $LIB_DIR,
+#   - MCP launchers: $VAULT/.openbrain/lib/{*-mcp.sh,_common.sh,_mcp-decl.sh,mcp-local-build.sh} → $LIB_DIR,
 #     plus orphan *-mcp.sh in $LIB_DIR. Scoped to exactly that set — shims/,
 #     clone-tier scripts, and .orphaned-launchers/ are never considered.
 #   - Claude hook wiring: openbrain entries in .claude/settings.json.
@@ -58,7 +58,7 @@ launcher_drift=0
 hook_drift=0
 
 # Launchers: changed or missing (managed_launchers in common.sh is the single
-# definition of the set: *-mcp.sh + _common.sh).
+# definition of the set: *-mcp.sh + _common.sh + _mcp-decl.sh + mcp-local-build.sh).
 while IFS= read -r f; do
   dest="$LIB_DIR/$(basename "$f")"
   if ! cmp -s "$f" "$dest" 2>/dev/null; then
@@ -144,6 +144,82 @@ if [ "$drift" = 0 ]; then
 fi
 
 restart=0
+restart_announced=0
+announce_restart(){
+  [ "$restart_announced" = 1 ] && return 0
+  restart_announced=1
+  printf '\n'
+  log "RESTART REQUIRED — the running Claude session still has the OLD runtime"
+  log "loaded; restart Claude Code so the deployed launchers/hooks take effect."
+}
+
+# registered_launcher_names : basenames (no .sh) of *-mcp.sh launchers under
+# LIB_DIR that a stdio entry in ~/.claude.json (user scope + this vault's project
+# entry) actually points at, with the directory compared by REALPATH. The SAME scope and filter as check-updates.sh's
+# registered(), so reconcile builds only what a machine actually runs (otherwise
+# every machine would clone and build every MCP, not just the ones it registers).
+# An unreadable registry builds nothing and says so (never a silent skip).
+registered_launcher_names(){
+  [ -f "$CLAUDE_JSON" ] || return 0
+  python3 - "$CLAUDE_JSON" "$VAULT" "$LIB_DIR" <<'PY'
+import json, os, sys
+claude_json, vault, lib_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    d = json.load(open(claude_json))
+    servers = dict(d.get("mcpServers") or {})
+except Exception as e:
+    print(f"[reconcile] WARNING: cannot read the MCP registry ({e}) — no source builds this run", file=sys.stderr)
+    sys.exit(0)
+servers.update(((d.get("projects") or {}).get(vault) or {}).get("mcpServers") or {})
+lib_real = os.path.realpath(lib_dir)
+for v in servers.values():
+    if not isinstance(v, dict) or v.get("type", "stdio") != "stdio":
+        continue
+    cmd = v.get("command", "")
+    if not cmd:
+        continue
+    d1, base = os.path.split(cmd)
+    if base.endswith("-mcp.sh") and os.path.realpath(d1) == lib_real:
+        print(base[:-3])
+PY
+}
+
+# build_registered_sources : for each registered launcher whose EFFECTIVE shape
+# is fork/checkout, or npm on the canary channel, run ensure_mcp_server in a
+# subshell (never let one bad build abort the rest — or the whole reconcile,
+# since it runs under set -euo pipefail) — then the origin-mismatch check.
+# npm stable is skipped: npx fetches it, nothing to build here.
+build_registered_sources(){
+  local name l shape
+  # Source the VAULT'S OWN _mcp-decl.sh (next to this script, HERE) — never the
+  # installed $LIB_DIR copy, which on a pulled-but-not-deployed machine may be
+  # stale or (right now, mid-deploy) briefly absent. Same rule as check-updates.sh.
+  [ -f "$HERE/_mcp-decl.sh" ] || { warn "_mcp-decl.sh not found at $HERE — skipping source builds"; return 0; }
+  # shellcheck source=/dev/null
+  source "$HERE/_mcp-decl.sh"
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    l="$LIB_DIR/$name.sh"; [ -f "$l" ] || continue
+    shape="$(mcp_eff_shape "$l")"
+    case "$shape" in
+      fork|checkout) ( ensure_mcp_server "$name" ) || warn "$name: ensure_mcp_server failed — see output above" ;;
+    esac
+  done < <(registered_launcher_names)
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    l="$LIB_DIR/$name.sh"; [ -f "$l" ] || continue
+    case "$(mcp_eff_shape "$l")" in fork|checkout) : ;; *) continue ;; esac
+    local dir url actual
+    dir="$(mcp_root "$l")"; case "$dir" in INVALID:*) continue ;; esac
+    [ -d "$dir/.git" ] || continue
+    url="$(mcp_get "$l" url)"; case "$url" in INVALID:*) continue ;; esac
+    if ! actual="$(git -C "$dir" remote get-url origin 2>&1)"; then
+      warn "$name: CANNOT-CHECK origin — 'git remote get-url origin' failed in $dir: $actual"; continue
+    fi
+    _mcp_url_eq "$actual" "$url" \
+      || warn "$name: origin is $actual, resolved declaration says $url — re-point: git -C $dir remote set-url origin $url — or, if that origin is intentional, set $name.url= (or owner=) in $MCP_CONFIG_FILE"
+  done < <(registered_launcher_names)
+}
 
 if [ "$launcher_drift" = 1 ]; then
   # DP3: reconcile is otherwise secret-blind. This is the one content check, and
@@ -173,6 +249,11 @@ if [ "$launcher_drift" = 1 ]; then
     log "deploying launchers + registry via register-mcps.sh"
     bash "$VAULT/bootstrap/lib/register-mcps.sh"
     restart=1
+    # RESTART REQUIRED before the builds start: the launchers are already
+    # deployed, and a Bash-tool timeout that kills this call mid-build must
+    # not lose the notice.
+    announce_restart
+    build_registered_sources
   else
     warn "launcher drift present but $ENV_FILE or $CLAUDE_JSON missing —"
     warn "run bootstrap/setup.sh to initialize; skipping launcher/registry deploy"
@@ -198,9 +279,5 @@ if [ "$hook_drift" = 1 ]; then
   fi
 fi
 
-if [ "$restart" = 1 ]; then
-  printf '\n'
-  log "RESTART REQUIRED — the running Claude session still has the OLD runtime"
-  log "loaded; restart Claude Code so the deployed launchers/hooks take effect."
-fi
+[ "$restart" = 1 ] && announce_restart
 exit "$wirer_apply_rc"
