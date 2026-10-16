@@ -31,7 +31,7 @@ load_env
 mkdir -p "$LIB_DIR"
 chmod 755 "$LIB_DIR"
 # Deploy ONLY the runtime launcher set (managed_launchers in common.sh is the
-# single definition — *-mcp.sh + _common.sh). Other .openbrain/lib/*.sh
+# single definition — *-mcp.sh + _common.sh + _mcp-decl.sh + mcp-local-build.sh). Other .openbrain/lib/*.sh
 # (clone-pii-gate.sh, template-scope.sh) are clone-tier tooling that runs from
 # the repo, not the per-machine runtime — don't pollute LIB_DIR with them.
 while IFS= read -r f; do
@@ -43,67 +43,13 @@ while IFS= read -r f; do
   fi
 done < <(managed_launchers "$REPO_ROOT/.openbrain/lib")
 ok "launcher scripts installed at $LIB_DIR"
-
-# Copy and build custom MCP servers into the runtime dir.
-# We copy source (not symlink) so node_modules/dist live locally and aren't
-# affected by Google Drive streaming mode or cross-machine sync issues.
-# CONFIG_DIR (not a hardcoded ~/.config) so this honors the sandbox override too.
-# Never fatal: custom servers are an optional feature, so a missing toolchain
-# or a failing build must not abort the core account registration below —
-# warn loudly and move on instead.
-if [[ -d "$REPO_ROOT/.openbrain/mcp" ]] && ! command -v npm >/dev/null 2>&1; then
-  warn "npm not found — skipping custom MCP build (.openbrain/mcp exists but cannot be built; core MCP registration continues)"
-elif [[ -d "$REPO_ROOT/.openbrain/mcp" ]]; then
-  # Remove legacy symlink if present
-  if [[ -L "$CONFIG_DIR/mcp" ]]; then
-    rm "$CONFIG_DIR/mcp"
-  fi
-  mkdir -p "$CONFIG_DIR/mcp"
-
-  for server_dir in "$REPO_ROOT/.openbrain/mcp"/*/; do
-    [[ -d "$server_dir" ]] || continue
-    # Only process directories that look like MCP server packages
-    [[ -f "$server_dir/package.json" ]] || continue
-    server_name="$(basename "$server_dir")"
-    dest="$CONFIG_DIR/mcp/$server_name"
-    mkdir -p "$dest"
-
-    # Sync source files (exclude build artifacts)
-    rsync -a --delete \
-      --exclude node_modules \
-      --exclude dist \
-      "$server_dir" "$dest/"
-
-    # Rebuild when the built entrypoint is missing OR any synced file is newer
-    # than it. Comparing only package.json vs dist misses the common case — a
-    # source-only edit — and then re-affirms "up to date" forever (silent
-    # false-negative). dist/ and node_modules/ are pruned from the newer-scan:
-    # the build regenerates dist and npm install mutates node_modules after
-    # the build, so including either would force a rebuild every run.
-    needs_build=0
-    if [[ ! -f "$dest/dist/index.js" ]]; then
-      needs_build=1
-    elif [[ -n "$(find "$dest" \( -path "$dest/dist" -o -path "$dest/node_modules" \) -prune -o -type f -newer "$dest/dist/index.js" -print 2>/dev/null | head -1)" ]]; then
-      needs_build=1
-    fi
-    if ! "$PYTHON_BIN" -c 'import json,sys; sys.exit(0 if "build" in json.load(open(sys.argv[1])).get("scripts",{}) else 1)' "$dest/package.json" 2>/dev/null; then
-      # Plain-JS server (no build script) — runs straight from synced source.
-      ok "$server_name synced (no build script — runs from source)"
-    elif [[ "$needs_build" -eq 1 ]]; then
-      step "building $server_name MCP server"
-      build_log="$dest/.build.log"
-      # Full npm output goes to the log — tail -1 style truncation destroys
-      # the actual compile error exactly when it is needed. Failure warns and
-      # continues: one broken optional server must not block core registration.
-      if (cd "$dest" && npm install --no-fund --no-audit && npm run build) > "$build_log" 2>&1; then
-        ok "$server_name built at $dest"
-      else
-        warn "$server_name build FAILED (rc=$?) — continuing without it; core MCP registration is unaffected. Full npm output: $build_log"
-      fi
-    else
-      ok "$server_name already up to date at $dest"
-    fi
-  done
+# .openbrain/mcp/ is no longer a source of MCP servers: nothing copies or builds
+# it. Say so loudly when it still holds something, instead of silently ignoring it.
+if [[ -d "$REPO_ROOT/.openbrain/mcp" ]] && [[ -n "$(ls -A "$REPO_ROOT/.openbrain/mcp")" ]]; then
+  warn "$REPO_ROOT/.openbrain/mcp/ is not empty, but custom MCP server copies there are no longer synced or built."
+  warn "  To keep running one: make its folder a git repo and commit the code (git init && git add -A && git commit), then give it a"
+  warn "  *-mcp.sh launcher in .openbrain/lib/ with a '# openbrain-mcp: shape=checkout dir=<name> url=file:///absolute/path/to/that/repo' declaration"
+  warn "  (grammar: .openbrain/lib/_mcp-decl.sh) and register it with 'claude mcp add'. Only committed code is built. See README: Adding your own MCP."
 fi
 
 # -----------------------------------------------------------------------------
@@ -366,7 +312,7 @@ info "Verify with: claude mcp list (or run /mcp inside a session)"
 #    (sync model v2). register-mcps.sh is the chokepoint every account
 #    add/remove funnels through, so it's where the gate's patterns get
 #    refreshed. pii-reseed.sh is script-only and this is its only caller; it
-#    ships with the pii-gate topic. Skipped when the repo doesn't ship it, and
+#    ships separately. Skipped when the repo doesn't ship it, and
 #    a no-op (with a note) on a machine with no clone patterns file to refresh.
 # -----------------------------------------------------------------------------
 # -f + explicit bash, not -x + direct exec: a lost executable bit (ZIP

@@ -28,6 +28,7 @@ SLUG="$(email_to_slug "$EMAIL")"
 
 info "Adding Google account: $EMAIL (slug: $SLUG)"
 
+ensure_node   # the build below needs node + npm
 ensure_mcp_server google
 
 ensure_env_file

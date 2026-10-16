@@ -47,19 +47,43 @@ step() { printf '\n%s%s%s\n' "$_C_BOLD$_C_BLUE" "$*" "$_C_RESET"; }
 
 # ---------- managed launcher set ----------
 # The SINGLE definition of which .openbrain/lib files are runtime launchers
-# (deployed to $LIB_DIR): the *-mcp.sh launchers plus the _common.sh they
-# source. Everything else in .openbrain/lib (clone-pii-gate.sh, scan-secrets.sh,
+# (deployed to $LIB_DIR): the *-mcp.sh launchers plus what they need at run
+# time — _common.sh, the _mcp-decl.sh it sources, and the mcp-local-build.sh
+# engine a lazy first-launch build runs. Everything else in .openbrain/lib (clone-pii-gate.sh, scan-secrets.sh,
 # reconcile-runtime.sh, ...) is vault/clone-tier tooling that runs from the
 # repo, not the per-machine runtime. minimal-init.sh, register-mcps.sh, and
 # reconcile-runtime.sh all iterate this helper — keep them on it so the set
 # cannot drift apart between deploy, drift-check, and init.
+source_mcp_decl() {
+  # ensure_mcp_server() and the declaration resolver (mcp_get/mcp_shape/...) live
+  # in the INSTALLED _mcp-decl.sh — minimal-init.sh deploys it as part of
+  # managed_launchers, before any add-*.sh script runs (setup.sh: step 5 before
+  # step 6's add-* calls) — never a copy vendored into this file, so external
+  # minimal-init.sh consumers need nothing extra here. When it isn't there yet
+  # (a fresh machine, or a script run out of order), don't just silently no-op:
+  # a later `ensure_mcp_server` call would fail as a bare "command not found"
+  # (rc 127), which names nothing. Define a stub that stops loud and names the
+  # exact path it tried instead.
+  if [[ -f "$LIB_DIR/_mcp-decl.sh" ]]; then
+    source "$LIB_DIR/_mcp-decl.sh"
+  else
+    ensure_mcp_server() {
+      die "ensure_mcp_server: _mcp-decl.sh not installed at $LIB_DIR/_mcp-decl.sh — run bootstrap/lib/minimal-init.sh or register-mcps.sh first"
+    }
+  fi
+  return 0
+}
+source_mcp_decl
+
 managed_launchers() {
   # usage: managed_launchers <src-dir>  — one existing path per line (may be none)
+  # _mcp-decl.sh is sourced by _common.sh (declaration parser + update policy), so it ships with it.
+  # mcp-local-build.sh is the build engine a launcher runs on a lazy first-launch build (canary/fork).
   # Empty/missing dir returns nothing rather than letting the glob degrade to
   # a root-directory scan ("/*-mcp.sh").
   local d="${1:-}" f
   [[ -n "$d" && -d "$d" ]] || return 0
-  for f in "$d"/*-mcp.sh "$d/_common.sh"; do
+  for f in "$d"/*-mcp.sh "$d/_common.sh" "$d/_mcp-decl.sh" "$d/mcp-local-build.sh"; do
     [[ -e "$f" ]] && printf '%s\n' "$f"
   done
   return 0
@@ -240,53 +264,6 @@ ensure_prereqs() {
   else
     ok "gh: not installed"
   fi
-}
-
-# ---------- MCP server source repos ----------
-# Each MCP server is a TypeScript project in its own GitHub repo, cloned to
-# $HOME/Code/<name>-mcp and built to dist/index.js. The launcher scripts in
-# .openbrain/lib/*.sh exec that built artifact. Override the GitHub owner with
-# OPENBRAIN_MCP_REPO_OWNER (e.g. if you've forked the servers).
-MCP_REPO_OWNER="${OPENBRAIN_MCP_REPO_OWNER:-davidianstyle}"
-MCP_SRC_ROOT="$HOME/Code"
-
-ensure_mcp_server() {
-  # ensure_mcp_server <name>   (e.g. "asana", "google", "slack", "fathom")
-  # Clones $MCP_REPO_OWNER/<name>-mcp into $MCP_SRC_ROOT if missing, then runs
-  # npm install + npm run build. Idempotent — re-runs the build only when
-  # dist/index.js is missing.
-  local name="$1"
-  local repo="${MCP_REPO_OWNER}/${name}-mcp"
-  local src_dir="$MCP_SRC_ROOT/${name}-mcp"
-  local dist="$src_dir/dist/index.js"
-
-  if [[ -f "$dist" ]]; then
-    ok "${name}-mcp already built ($src_dir)"
-    return 0
-  fi
-
-  ensure_node
-
-  if [[ ! -d "$src_dir" ]]; then
-    mkdir -p "$MCP_SRC_ROOT"
-    info "cloning $repo → $src_dir"
-    if command -v gh >/dev/null 2>&1; then
-      gh repo clone "$repo" "$src_dir" >/dev/null \
-        || die "failed to clone $repo via gh — confirm access (gh auth status) or set OPENBRAIN_MCP_REPO_OWNER"
-    else
-      git clone "https://github.com/${repo}.git" "$src_dir" \
-        || die "failed to clone https://github.com/${repo}.git — install gh (brew install gh) for private-repo auth"
-    fi
-  fi
-
-  info "installing ${name}-mcp dependencies (npm install in $src_dir)"
-  ( cd "$src_dir" && npm install ) || die "npm install failed in $src_dir"
-
-  info "building ${name}-mcp (npm run build)"
-  ( cd "$src_dir" && npm run build ) || die "npm run build failed in $src_dir"
-
-  [[ -f "$dist" ]] || die "build completed but $dist still missing — investigate $src_dir"
-  ok "${name}-mcp built ($dist)"
 }
 
 ensure_venv() {

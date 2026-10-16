@@ -20,6 +20,7 @@ ENV_VAR="SLACK_TOKEN_$(slug_to_envvar "$SLUG")"
 
 info "Adding Slack workspace: $SLUG (env var: $ENV_VAR)"
 
+ensure_node   # the build below needs node + npm
 ensure_mcp_server slack
 
 step "Slack app setup"
