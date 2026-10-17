@@ -145,8 +145,7 @@ in_roots() {
 }
 
 # pii_patterns <file> — the ONE normalizer for a machine's `.openbrain/local/pii-patterns`, used by push's
-# step-4 scan and pull's incoming scan (receiving-pii-scan.sh + the DP2 coverage count) so the two can never
-# read the same file differently. Strips a UTF-8 BOM, CR line ends and padding; drops comments and blanks.
+# step-4 scan. Strips a UTF-8 BOM, CR line ends and padding; drops comments and blanks.
 # A `word:` entry comes out as `word:<entry>` (padding inside trimmed too); a bare `word:` is dropped.
 # A `re:` entry has no effect here (`re:` is pii-fakes.txt syntax): it passes through as a plain substring and a
 # warning naming its line number (never the entry) goes to stderr.
@@ -157,8 +156,8 @@ pii_patterns() {
     /^word:/ {w=substr($0,6); sub(/^[[:space:]]+/,"",w); if (w=="") next; print "word:" w; next} {print}' "$1"
 }
 
-# pii_match <plain|word> <entries-file> <text-file> — the ONE matcher for pii-patterns entries (push's step-4 scan and pull's
-# incoming scan). Both sides are Unicode-normalized (NFC) and casefolded before comparing, so `josé` matches `JOSÉ` and an
+# pii_match <plain|word> <entries-file> <text-file> — the ONE matcher for pii-patterns entries (push's step-4 scan).
+# Both sides are Unicode-normalized (NFC) and casefolded before comparing, so `café` matches `CAFÉ` and an
 # NFD-written entry matches NFC text; `LC_ALL=C grep -i` folds ASCII only and missed both. `plain`: substring; `word`: whole
 # word (no letter, digit or `_` either side). Text is read as bytes, one line per newline; a line that is not UTF-8 is
 # decoded with replacement, so its ASCII still matches. Prints `<line>:<text>` per matching line (grep -n shape).

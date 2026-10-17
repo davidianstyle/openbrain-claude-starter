@@ -1,6 +1,6 @@
 ---
 name: pull-openbrain-template
-description: Pull the latest changes from the upstream openbrain-claude-starter repo into this vault — a take of the template's public main from the last dispositioned point, per-file 3-way merge, incoming content scanned before it lands, one marker row when everything is dispositioned.
+description: Pull the latest changes from the upstream openbrain-claude-starter repo into this vault — a take of the template's public main from the last dispositioned point, per-file 3-way merge, one marker row when everything is dispositioned.
 ---
 
 # /pull-openbrain-template
@@ -11,7 +11,7 @@ The template repo must be cloned locally — by default at `~/openbrain-claude-s
 
 ## Inputs
 
-- `$1` (optional): `--dry-run` — plan (and, unless the plan's nothing-new line already fired, the step 1b scan), write nothing, delete the scratch dir.
+- `$1` (optional): `--dry-run` — plan, write nothing, delete the scratch dir.
 
 Scope (`PORTABLE_ROOTS`) and the hard-deny list are both defined once in `.openbrain/lib/template-scope.sh` and sourced by the plan block below — the same file `/push-openbrain-template` sources, so the two skills can never disagree on what's portable; `.openbrain/template-ignore` is this vault's own file, read directly by this skill.
 
@@ -26,8 +26,6 @@ VAULT="$(pwd)"; TEMPLATE="${OPENBRAIN_TEMPLATE_DIR:-$HOME/openbrain-claude-start
 [ -d "${TEMPLATE:?}/.git" ] || { echo "STOP: no template clone at $TEMPLATE"; exit 1; }
 UPR=origin; (cd "$TEMPLATE" && git remote) > "${TMPDIR:-/tmp}/pull-remotes.$$" || { echo "STOP: CANNOT-CHECK — git remote failed"; exit 1; }; LC_ALL=C command grep -qx upstream "${TMPDIR:-/tmp}/pull-remotes.$$" && UPR=upstream; HAS_STAGING=0; LC_ALL=C command grep -qx staging "${TMPDIR:-/tmp}/pull-remotes.$$" && HAS_STAGING=1; rm -f "${TMPDIR:-/tmp}/pull-remotes.$$"
 ( cd "$TEMPLATE" && git checkout -q main && [ -z "$(git status --porcelain)" ] && GIT_TERMINAL_PROMPT=0 git fetch -q --prune "$UPR" && { [ "$HAS_STAGING" -eq 0 ] || GIT_TERMINAL_PROMPT=0 git fetch -q --prune staging; } ) || { echo "STOP: template clone is not clean on main, or fetching $UPR/staging failed"; exit 1; }   # staging too: the plan's direction check compares against taken topic shas, which live there
-command -v python3 >/dev/null 2>&1 || { echo "STOP: CANNOT-CHECK — python3 missing (needed to count scan findings by type)"; exit 1; }
-rc=0; pii-scan --selftest >/dev/null 2>&1 || rc=$?; [ "$rc" -eq 0 ] || { echo "STOP: CANNOT-CHECK — pii-scan selftest exit $rc; repair with \"$VAULT\"/bootstrap/lib/install-pii-scan.sh"; exit 1; }
 find "${TMPDIR:-/tmp}" -maxdepth 1 -type d -name 'pull-scan.*' -user "$(id -un)" -exec rm -rf {} +
 SCAN_DIR="$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/pull-scan.XXXXXX")" && chmod 700 "$SCAN_DIR" && echo "SCAN_DIR=$SCAN_DIR" && echo "TOPIC=upstream ($UPR/main = $(cd "$TEMPLATE" && git rev-parse --short "$UPR/main"))" || exit 1
 ```
@@ -45,7 +43,7 @@ set -o pipefail; umask 077
 VAULT="${VAULT:?}"; TEMPLATE="${TEMPLATE:?}"; MARK="$VAULT/.openbrain/local/taken.tsv"
 ROW="topic/$TOPIC"; case "$TOPIC" in upstream) UPR=origin; (cd "$TEMPLATE" && git remote) > "$SCAN_DIR/remotes.txt" || { echo "STOP: CANNOT-CHECK — git remote failed"; exit 1; }; LC_ALL=C command grep -qx upstream "$SCAN_DIR/remotes.txt" && UPR=upstream; BR="$UPR/main"; ROW=upstream; echo "upstream preset: the topic is $BR (public template main); marker row 'upstream'" ;; *) BR="staging/topic/$TOPIC" ;; esac   # /take-openbrain-template runs this block with TOPIC=<name> for a staging topic (take ships alongside or after pull)
 [ -d "$SCAN_DIR" ] || { echo "STOP: CANNOT-CHECK — scratch dir '$SCAN_DIR' missing"; exit 1; }
-rm -f "$SCAN_DIR/dp2.done" "$SCAN_DIR/dp2-blocked.lst" "$SCAN_DIR/plan.tsv" "$SCAN_DIR/tip.txt"   # FIRST, before anything can STOP: a re-plan that stops part-way leaves no plan and no tip, so DP2/apply/mark cannot certify the previous plan for a new tip
+rm -f "$SCAN_DIR/plan.tsv" "$SCAN_DIR/tip.txt"   # FIRST, before anything can STOP: a re-plan that stops part-way leaves no plan and no tip, so apply/mark cannot certify the previous plan for a new tip
 cd "$TEMPLATE" || exit 1
 LIB="$VAULT/.openbrain/lib/template-scope.sh"
 [ -f "$LIB" ] || { echo "STOP: CANNOT-CHECK — template-scope.sh missing at $LIB; restore it from git, or re-pull the template — it ships alongside /push-openbrain-template"; exit 1; }
@@ -192,50 +190,6 @@ printf '%s\n' "$FROM" > "$SCAN_DIR/from.txt" && printf '%s\n' "$TIP" > "$SCAN_DI
 
 Export the `TIP` it printed.
 
-### 1b. DP2 — scan what is about to land, before de-genericization
-
-Incoming template content is generic by contract; this machine's own identifiers, or anyone's, in it mean a genericization miss upstream. Two scanners, both required to be present, three outcomes each. The pattern scan reads the **whole** incoming blob, never only the lines that differ from the vault copy: this machine's identifiers, once pushed, come back on lines identical to the vault's own. NER reads the incoming added lines (the whole file when it is new).
-
-```bash
-# --- pull-skill: dp2 ---
-set -o pipefail; umask 077
-: "${SCAN_DIR:?}"; : "${TIP:?}"; VAULT="${VAULT:?}"; TEMPLATE="${TEMPLATE:?}"; [ "${TOPIC:-}" = upstream ] || { echo "STOP: this block runs only with TOPIC=upstream"; exit 1; }
-[ -s "$SCAN_DIR/plan.tsv" ] || { echo "STOP: CANNOT-CHECK — no plan in $SCAN_DIR"; exit 1; }
-[ "$(cat "$SCAN_DIR/tip.txt" 2>/dev/null)" = "$TIP" ] || { echo "STOP: CANNOT-CHECK — exported TIP is not the sha this plan was made for ($(cat "$SCAN_DIR/tip.txt" 2>/dev/null)); re-export it"; exit 1; }
-RSCAN="$VAULT/.openbrain/lib/receiving-pii-scan.sh"; [ -f "$RSCAN" ] || { echo "STOP: CANNOT-CHECK — $RSCAN missing (vault-resident pattern scanner)"; exit 1; }
-LIB="$VAULT/.openbrain/lib/template-scope.sh"; [ -f "$LIB" ] || { echo "STOP: CANNOT-CHECK — template-scope.sh missing at $LIB"; exit 1; }; source "$LIB"; typeset -f pii_patterns >/dev/null 2>&1 || { echo "STOP: CANNOT-CHECK — pii_patterns() did not load from $LIB"; exit 1; }
-PSYNC="$VAULT/.openbrain/lib/pii-patterns-sync.sh"; if [ -f "$PSYNC" ]; then psrc=0; PSOUT="$(bash "$PSYNC" --clone "$TEMPLATE" 2>&1)" || psrc=$?; [ -z "$PSOUT" ] || printf '%s\n' "$PSOUT"; case "$psrc" in 0|3) psync="sync ok" ;; 10) psync="sync WARN — the clone copy was NOT regenerated (entries the vault copy lacks); read as is" ;; *) echo "STOP: CANNOT-CHECK — pii-patterns sync failed (rc $psrc); the clone copy may be stale"; exit 1 ;; esac; else psync="sync MISSING — no vault pii-patterns-sync.sh; the clone copy is read as is"; echo "pii-patterns sync: MISSING — no $PSYNC; the clone copy is read as is"; fi   # the vault's sync, when present, regenerates the clone copy before it is read; absent is stated, never silent
-PATFILE="$TEMPLATE/.openbrain/local/pii-patterns"; npat=0; if [ -f "$PATFILE" ]; then npat="$(pii_patterns "$PATFILE" | wc -l | tr -d ' ')" || { echo "STOP: CANNOT-CHECK — could not read $PATFILE"; exit 1; }; fi; pat_state="active ($npat)"; [ "$npat" -gt 0 ] || { if [ -f "$PATFILE" ]; then pat_state="INACTIVE — $PATFILE has no active pattern after normalization; the NER scan still ran"; else pat_state="INACTIVE — no pii-patterns on this machine; the NER scan still ran"; fi; }
-rc=0; pii-scan --selftest >/dev/null 2>&1 || rc=$?; [ "$rc" -eq 0 ] || { echo "STOP: CANNOT-CHECK — pii-scan selftest exit $rc"; exit 1; }
-command -v python3 >/dev/null 2>&1 || { echo "STOP: CANNOT-CHECK — python3 missing"; exit 1; }
-: > "$SCAN_DIR/dp2-blocked.lst"; rm -f "$SCAN_DIR/dp2.done"; n=0; nblocked=0; nner=0; nskip=0; total="$(LC_ALL=C awk 'NF' "$SCAN_DIR/plan.tsv" | wc -l | tr -d ' ')"
-trap 'rm -f "$SCAN_DIR/dp2.in" "$SCAN_DIR/dp2.txt" "$SCAN_DIR/dp2.json" "$SCAN_DIR/dp2.err"' EXIT   # matched text may sit in these on ANY exit path; only the per-row findings JSON stays (0700 dir)
-cd "$TEMPLATE" || exit 1
-while IFS=$'\t' read -r rel kind note <&3; do
-  case "$kind" in new|merge|conflict|claude-md|cannot-merge|symlink) ;; *) nskip=$((nskip+1)); continue ;; esac   # cannot-merge and symlink are hand-copied from the topic by the user — scanned too; delete/orphan/identical/ignored/out-of-scope bring no bytes in
-  n=$((n+1)); git show "$TIP:$rel" > "$SCAN_DIR/dp2.in" || { echo "STOP: CANNOT-CHECK — git show $TIP:$rel failed"; exit 1; }
-  why=""
-  if [ "$(LC_ALL=C tr -d '\000' < "$SCAN_DIR/dp2.in" | wc -c)" -ne "$(wc -c < "$SCAN_DIR/dp2.in")" ]; then why="binary (NUL bytes) — no text scanner can see into it; a NUL past the first 8 KB still merges as text"; nblocked=$((nblocked+1)); printf '%s\t%s\n' "$rel" "$why" >> "$SCAN_DIR/dp2-blocked.lst"; continue; fi
-  if [ "$npat" -gt 0 ]; then   # pattern backstop: this machine's account-derived identifiers
-    prc=0; bash "$RSCAN" "$PATFILE" "$SCAN_DIR/dp2.in" >/dev/null 2>"$SCAN_DIR/dp2.err" || prc=$?   # the WHOLE incoming blob: the user's own PII, once pushed, sits on lines identical to the vault copy
-    case "$prc" in 0) if LC_ALL=C command grep -q 'gate inactive' "$SCAN_DIR/dp2.err"; then pat_state="INACTIVE — the pattern scanner found no ACTIVE pattern in $PATFILE (it said so on stderr); the NER scan still ran"; fi ;;   # the scanner's own verdict wins over a line count
-      1) why="pii-patterns match" ;; *) cat "$SCAN_DIR/dp2.err"; echo "STOP: CANNOT-CHECK — receiving-pii-scan exit $prc on $rel"; exit 1 ;; esac
-  fi
-  if [ -f "$VAULT/$rel" ]; then drc=0; diff -a "$VAULT/$rel" "$SCAN_DIR/dp2.in" > "$SCAN_DIR/dp2.diff" || drc=$?; [ "$drc" -le 1 ] || { echo "STOP: CANNOT-CHECK — diff exit $drc on $rel (unreadable vault file?)"; exit 1; }; LC_ALL=C sed -n 's/^> //p' "$SCAN_DIR/dp2.diff" > "$SCAN_DIR/dp2.txt"; rm -f "$SCAN_DIR/dp2.diff"; else cp "$SCAN_DIR/dp2.in" "$SCAN_DIR/dp2.txt"; fi   # NER over the incoming ADDED lines (new file: whole); diff rc 0/1 are answers, 2 is not
-  if LC_ALL=C command grep -q '[^[:space:]]' "$SCAN_DIR/dp2.txt"; then
-    nner=$((nner+1)); nrc=0; pii-scan --mode gate --format json "$SCAN_DIR/dp2.txt" > "$SCAN_DIR/dp2.json" 2>"$SCAN_DIR/dp2.err" || nrc=$?
-    case "$nrc" in 0) ;; 1) c="$(python3 -c 'import json,sys,collections; d=json.load(open(sys.argv[1])); c=collections.Counter((x.get("entity_type") or x.get("type")) for x in d.get("findings",[])); print(", ".join("%s %d"%kv for kv in sorted(c.items())))' "$SCAN_DIR/dp2.json")"; why="${why:+$why; }NER: $c"; label="$(printf '%s' "$rel" | tr '/' '_')"; mv "$SCAN_DIR/dp2.json" "$SCAN_DIR/dp2-$label.json" ;;
-      *) cat "$SCAN_DIR/dp2.err"; echo "STOP: CANNOT-CHECK — pii-scan exit $nrc on $rel (2 never means clean)"; exit 1 ;; esac
-  fi
-  [ -z "$why" ] || { nblocked=$((nblocked+1)); printf '%s\t%s\n' "$rel" "$why" >> "$SCAN_DIR/dp2-blocked.lst"; }
-done 3< "$SCAN_DIR/plan.tsv"
-printf '%s\n' "$TIP" > "$SCAN_DIR/dp2.done"   # the apply and mark blocks refuse an upstream plan without this, for this tip
-echo "DP2: $n of $total plan row(s) scanned ($nskip bring no bytes in: delete/orphan/identical/ignored/out-of-scope), $nner through NER; patterns=$pat_state; $psync; $nblocked held for review"
-[ "$nblocked" -eq 0 ] || { echo "held (path, why):"; cat "$SCAN_DIR/dp2-blocked.lst"; }
-```
-
-A held row is a **hand item**: the apply block refuses it, and the mark block refuses to advance while a held path sits in `applied.lst` or `skipped.lst`. A `binary` hold means no text scanner could look; take it only if you know what it is. Show the user each finding in plain language (`PERSON` in `<path>`, the line … — a real person?; a pattern hold can sit on a line identical to the vault's) one `AskUserQuestion` at a time, reading the text from `$SCAN_DIR/dp2-<label>.json` yourself and never pasting it into the report; a `URL`-only set may be one grouped prompt per file, exactly as the push skill's step 4 rules say. Accept-with-reason → remove the row from `dp2-blocked.lst` and record the reason (type + path, never the text) in the report; anything else → the path goes to `.openbrain/template-ignore` (a permanent decline, then re-plan) or the pull stops here for an upstream fix. The per-row JSON lives only in the 0700 scratch dir; a pull that holds rows does not advance the marker, so that dir persists until the next run's preflight sweeps it — do not copy it anywhere.
-
 ### 2. De-genericize the scratch copies
 
 Edit `$SCAN_DIR/merged/<path>` (never the vault) for every `new`/`merge` row the user will be offered, reversing the template's genericization: `{{USER_NAME}}`/`{{USER_EMAIL}}`/`{{BOOTSTRAP_DATE}}` → the vault's values; `{{GOOGLE_ACCOUNTS_TABLE}}`, `{{SLACK_WORKSPACES_TABLE}}`, `{{ASANA_ROUTING_TABLE}}`, `{{FATHOM_TABLE}}` → **keep the vault's existing resolved tables** (never overwrite resolved tables with placeholders); `~/OpenBrain` → the vault's path; `mcp__google_<slug>__*`, `mcp__slack_<workspace_slug>__*`, `<slug>` → the vault's concrete names where they already exist. Port structure and procedure, not identity.
@@ -259,7 +213,6 @@ Show the plan to the user and, for each row:
 set -o pipefail; umask 022                                # vault files are 644/755, not scratch-private
 : "${SCAN_DIR:?}"; : "${TOPIC:?}"; VAULT="${VAULT:?}"
 [ -s "$SCAN_DIR/approved.lst" ] || { : > "$SCAN_DIR/applied.lst"; echo "STOP: nothing approved — write the approved paths, one per line, to $SCAN_DIR/approved.lst (or skip every clean item and go straight to the mark block)"; exit 1; }
-[ "$TOPIC" != upstream ] || [ "$(cat "$SCAN_DIR/dp2.done" 2>/dev/null)" = "$(cat "$SCAN_DIR/tip.txt" 2>/dev/null)" ] || { echo "STOP: CANNOT-CHECK — the incoming scan (pull step 1b) has not run for this plan; nothing from upstream is written unscanned"; exit 1; }
 touch "$SCAN_DIR/skipped.lst"; both="$(LC_ALL=C comm -12 <(LC_ALL=C awk 'NF' "$SCAN_DIR/approved.lst" | LC_ALL=C sort -u) <(LC_ALL=C awk 'NF' "$SCAN_DIR/skipped.lst" | LC_ALL=C sort -u))"
 [ -z "$both" ] || { echo "STOP: approved AND skipped — decide one way: $both"; exit 1; }
 : > "$SCAN_DIR/applied.lst"; changed=0; same=0
@@ -269,7 +222,6 @@ while IFS= read -r rel <&3; do
   case "$(printf '%s' "$rel" | tr 'A-Z' 'a-z')" in claude.md|*/claude.md|claude.local.md|*/claude.local.md) echo "STOP: $rel is never written by this block — approve its hunks one by one and edit it directly"; exit 1 ;; esac
   kind="$(LC_ALL=C awk -F'\t' -v r="$rel" '$1==r && ($2=="new"||$2=="merge") {print $2}' "$SCAN_DIR/plan.tsv")"
   [ -n "$kind" ] || { echo "STOP: '$rel' is not a clean new/merge item in the plan — conflicts, deletes, orphans and symlinks are handled by hand, not here"; exit 1; }
-  ! { [ -f "$SCAN_DIR/dp2-blocked.lst" ] && LC_ALL=C command grep -q "^$(printf '%s' "$rel" | sed 's/[][\.*^$]/\\&/g')	" "$SCAN_DIR/dp2-blocked.lst"; } || { echo "STOP: '$rel' is HELD by the incoming scan (dp2-blocked.lst) — disposition its findings first; a held row is never written by this block"; exit 1; }
   [ -f "$SCAN_DIR/merged/$rel" ] || { echo "STOP: CANNOT-CHECK — merged copy for $rel is missing"; exit 1; }
   want="$(LC_ALL=C awk -F'\t' -v r="$rel" '$2==r {print $1}' "$SCAN_DIR/digests.tsv")"   # the vault file the plan merged against must be unchanged since
   if [ "$want" = ABSENT ]; then [ ! -e "$VAULT/$rel" ] && [ ! -L "$VAULT/$rel" ] || { echo "STOP: $rel appeared in the vault after the plan was made — re-run the plan"; exit 1; }
@@ -349,9 +301,7 @@ Any skill layered on these blocks runs this one by reference, exactly like apply
 : "${SCAN_DIR:?}"; : "${TOPIC:?}"; : "${TIP:?export TIP=<the sha the plan printed>}"; VAULT="${VAULT:?}"; ROW="topic/$TOPIC"; [ "$TOPIC" != upstream ] || ROW=upstream
 [ -d "$SCAN_DIR" ] && [ -s "$SCAN_DIR/plan.tsv" ] || { echo "STOP: CANNOT-CHECK — no plan in $SCAN_DIR (already marked and cleaned up, or the plan never ran); nothing to certify, no row written"; exit 1; }
 [ "$(cat "$SCAN_DIR/tip.txt" 2>/dev/null)" = "$TIP" ] || { echo "STOP: CANNOT-CHECK — exported TIP is not the sha this plan was made for ($(cat "$SCAN_DIR/tip.txt" 2>/dev/null)); the marker records only what was planned"; exit 1; }
-[ "$TOPIC" != upstream ] || [ "$(cat "$SCAN_DIR/dp2.done" 2>/dev/null)" = "$TIP" ] || { echo "STOP: CANNOT-CHECK — the incoming scan (pull step 1b) has not run for this plan; the marker never moves past unscanned upstream content"; exit 1; }
-touch "$SCAN_DIR/applied.lst" "$SCAN_DIR/resolved.lst" "$SCAN_DIR/skipped.lst"   # before the held check: sort over a missing list prints nothing and would read as "none held"
-if [ -s "$SCAN_DIR/dp2-blocked.lst" ]; then held="$(LC_ALL=C cut -f1 "$SCAN_DIR/dp2-blocked.lst" | LC_ALL=C sort -u | LC_ALL=C comm -12 - <(LC_ALL=C sort -u "$SCAN_DIR/applied.lst" "$SCAN_DIR/skipped.lst" "$SCAN_DIR/resolved.lst"))"; [ -z "$held" ] || { echo "marker NOT advanced: rows HELD by the incoming scan were applied, skipped or resolved without a recorded disposition — $held"; exit 1; }; fi
+touch "$SCAN_DIR/applied.lst" "$SCAN_DIR/resolved.lst" "$SCAN_DIR/skipped.lst"
 pending="$(LC_ALL=C awk -F'\t' 'FILENAME==ARGV[1] {r[$0]=1; next} ($2=="conflict"||$2=="cannot-merge"||$2=="claude-md"||$2=="delete"||$2=="orphan"||$2=="symlink") && !($1 in r) {n++} END {print n+0}' "$SCAN_DIR/resolved.lst" "$SCAN_DIR/plan.tsv")"   # FILENAME, not FNR==NR: an empty first file would swallow the second
 LC_ALL=C awk -F'\t' '$2=="new"||$2=="merge" {print $1}' "$SCAN_DIR/plan.tsv" | LC_ALL=C sort -u > "$SCAN_DIR/planned.sorted"; planned="$(wc -l < "$SCAN_DIR/planned.sorted" | tr -d ' ')"
 LC_ALL=C awk 'NF' "$SCAN_DIR/applied.lst" | LC_ALL=C sort -u | LC_ALL=C comm -12 - "$SCAN_DIR/planned.sorted" > "$SCAN_DIR/applied.sorted"   # what the apply block WROTE, restricted to THIS plan (a stale list from an earlier plan pays for nothing)
@@ -394,7 +344,7 @@ rc=0; bash "$R" --check || rc=$?; case "$rc" in 0) echo "runtime: in sync" ;; 10
 
 ### 6. Report
 
-Taken: `upstream` from `<FROM>` (and why that start point) to `<TIP>`; the plan counts, template-ignore and direction lines; applied files with modes, changed vs already identical; skipped; **verify lines and the outcome-led coverage line (CANNOT-CHECK/FINDINGS/CLEAN — N run, M failed, ...)** — from step 4b, which ran before the marker line below and never gated it; **DP2 coverage line and held rows by path and finding type only**; conflicts and CLAUDE.md hunks left for the user; marker advanced or why not; runtime line. In `--dry-run`, stop at step 1's nothing-new line when it fires, otherwise after step 1b; either way, `rm -rf "$SCAN_DIR"`.
+Taken: `upstream` from `<FROM>` (and why that start point) to `<TIP>`; the plan counts, template-ignore and direction lines; applied files with modes, changed vs already identical; skipped; **verify lines and the outcome-led coverage line (CANNOT-CHECK/FINDINGS/CLEAN — N run, M failed, ...)** — from step 4b, which ran before the marker line below and never gated it; conflicts and CLAUDE.md hunks left for the user; marker advanced or why not; runtime line. In `--dry-run`, stop after step 1 (its plan, or its nothing-new line), then `rm -rf "$SCAN_DIR"`.
 
 ## Notes
 
@@ -406,4 +356,4 @@ Taken: `upstream` from `<FROM>` (and why that start point) to `<TIP>`; the plan 
 - `.openbrain/template-ignore` is where a permanent decline lives: matching paths are never taken (count + list printed every run, one no-byte `ignored` plan row each; a stale exact entry is named). **Un-ignoring later** gives that path a first merge whose base the vault never took — expect a conflict and resolve it by hand.
 - Taking a topic that replaces `.openbrain/lib/template-scope.sh` itself — the file the plan block sources `deny()`/`in_roots()` from — works because the plan block sources it once, before any file is written; later blocks do not re-source it. A self-modifying run (this file included, since it is itself a candidate `/push-openbrain-template` can port) is expected, not an error.
 - The marker file (`.openbrain/local/taken.tsv`) is per machine and gitignored; it replaces the retired `openbrain-applied/*` tags and `TOPICS.md` rows. **Rows accumulate — one per take, never tidied to one row per branch.** Readers use the last row per label for the start point; the direction check reads the whole history (every sha a topic was ever taken at), so deleting older rows blinds it.
-- Callers extract the marked block range (`# --- pull-skill: <name> ---` through the closing fence) and never read this file whole — a whole-file read is a ~70% per-run cost increase for a caller. This applies to the six CODE blocks (`preflight`/`plan`/`dp2`/`apply`/`verify`/`mark`) only — a step this skill's callers reach by section reference instead (e.g. pull §2 "De-genericize the scratch copies" / §3 "Present") is read by the executor at that heading (they are `###` steps; `--section` serves `##` sections such as a `## Findings` ledger), never by extracting the whole file. Extraction runs through the shared helper — depends on `.openbrain/lib/extract-block.sh` (ships alongside `/push-openbrain-template`): `bash "$VAULT/.openbrain/lib/extract-block.sh" "$VAULT/.claude/skills/pull-openbrain-template/SKILL.md" 'pull-skill: plan'` (swap the marker name for the other five blocks; both paths always absolute — this skill's own preflight cds into the template clone, so a relative form would read the wrong copy, or nothing). Same stable command string for every call site, one permission approval instead of a fresh one per ad hoc awk invocation. Three outcomes: `0` body on stdout, `2` CANNOT-CHECK (message says which of file unreadable / missing marker / duplicate marker / missing fence (marker mode only — a section's end is EOF-valid) / empty body / bad usage), `127` the helper is not at that absolute path — restore it from git, or re-pull the template.
+- Callers extract the marked block range (`# --- pull-skill: <name> ---` through the closing fence) and never read this file whole — a whole-file read is a ~70% per-run cost increase for a caller. This applies to the five CODE blocks (`preflight`/`plan`/`apply`/`verify`/`mark`) only — a step this skill's callers reach by section reference instead (e.g. pull §2 "De-genericize the scratch copies" / §3 "Present") is read by the executor at that heading (they are `###` steps; `--section` serves `##` sections such as a `## Findings` ledger), never by extracting the whole file. Extraction runs through the shared helper — depends on `.openbrain/lib/extract-block.sh` (ships alongside `/push-openbrain-template`): `bash "$VAULT/.openbrain/lib/extract-block.sh" "$VAULT/.claude/skills/pull-openbrain-template/SKILL.md" 'pull-skill: plan'` (swap the marker name for the other four blocks; both paths always absolute — this skill's own preflight cds into the template clone, so a relative form would read the wrong copy, or nothing). Same stable command string for every call site, one permission approval instead of a fresh one per ad hoc awk invocation. Three outcomes: `0` body on stdout, `2` CANNOT-CHECK (message says which of file unreadable / missing marker / duplicate marker / missing fence (marker mode only — a section's end is EOF-valid) / empty body / bad usage), `127` the helper is not at that absolute path — restore it from git, or re-pull the template.
