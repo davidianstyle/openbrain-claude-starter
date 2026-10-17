@@ -32,7 +32,7 @@ Three things this skill will not do, ever: walk the filesystem to find candidate
 
 Also never read: `~/.config/openbrain/.env`, `~/.claude/projects/.../memory/`.
 
-**The default scope is a roots allowlist, not a deny-everything-else list.** `all` (and every scope hint below `bootstrap`) enumerates only `PORTABLE_ROOTS` — the paths `.claude/skills/`, `.openbrain/`, `+ Extras/Templates/`, `CLAUDE.md`, `README.md`, and the four per-machine-safe `.obsidian/*.json` files — as defined once in `.openbrain/lib/template-scope.sh` (`in_roots()`) and shared by every sync skill (push, pull, and any skill layered on these blocks). A path outside the roots is never a candidate under `all`; it takes an explicit hint that names it (`bootstrap`, or the path itself) to reach it. The hard-deny table above still applies on top of the roots — it exists for paths that could otherwise slip into a root (`.openbrain/local/` is under `.openbrain/`, `+ Extras/Templates/` is carved back out of the wider `+ ` deny) — not to bound the *rest* of the repo, which the roots already exclude.
+**The default scope is a roots allowlist, not a deny-everything-else list.** `all` (and every scope hint below `bootstrap`) enumerates only `PORTABLE_ROOTS` — the paths `.claude/skills/`, `.openbrain/`, `+ Extras/Templates/`, `CLAUDE.md`, `README.md`, and the four per-machine-safe `.obsidian/*.json` files — as defined once in `.openbrain/lib/template-scope.sh` (`in_roots()`) and shared by every sync skill (push, pull, and any skill layered on these blocks). The hard-deny table above still applies on top of the roots (`.openbrain/local/` is under `.openbrain/`; `+ Extras/Templates/` is carved back out of the wider `+ ` deny).
 
 | Vault path | Template path | Notes |
 |---|---|---|
@@ -43,9 +43,9 @@ Also never read: `~/.config/openbrain/.env`, `~/.claude/projects/.../memory/`.
 | `CLAUDE.md` | same | Most delicate — see §"CLAUDE.md handling" below |
 | `.obsidian/app.json`, `core-plugins.json`, `appearance.json`, `graph.json` | same | Only port if a setting is universally useful. Per-machine files are gitignored and never enumerate. |
 | `README.md` | same | Only port if there's a real improvement |
-| `bootstrap/` | same | Has its own architecture. It **is** one of `PORTABLE_ROOTS` (David's own pull-skill text roots it — "include in diff, but flag for careful review"), but push's own upstream text says the opposite ("only update if explicitly asked"), so `template-scope.sh`'s `PUSH_ALL_OMITS` subtracts it from this skill's `all` — the `bootstrap` scope hint, or a path under it, still reaches it on request. This is a real asymmetry in David's own two files, not a mismatch to fix here |
+| `bootstrap/` | same | Has its own architecture. Only update if explicitly asked: it is one of `PORTABLE_ROOTS`, but `template-scope.sh`'s `PUSH_ALL_OMITS` subtracts it from this skill's `all` — the `bootstrap` scope hint, or a path under it, reaches it (why pull differs: `bootstrap/PII-SCAN-CONTRACT.md`, "Design notes") |
 
-`Dashboard.md` and `.gitignore`, which an earlier version of this table listed as portable, are no longer roots — the roots list is now the shared, sourced one in `template-scope.sh`, and neither of those two ships in it. **These paths are not portable at all: no scope hint, including an explicit path, reaches outside `PORTABLE_ROOTS`** — the roots are the whole scope, not a default that a specific-enough hint can escape. A hint that names a path outside the roots is refused at step 1 (`in_roots` empties it, and the block STOPs naming the hint rather than silently enumerating nothing). This is a different mechanism from `.openbrain/template-ignore`, which declines specific paths *inside* the roots that the destination already has — **deliberate divergence only** (a vault's personalized keepers, home despite being upstream); a vault-only file needs no entry, because an unnamed new file is never offered: matching paths never become candidates here, and never arrive through `/pull-openbrain-template`; the enumerate block prints its count and list every run. A real improvement to `Dashboard.md` or `.gitignore` would need `PORTABLE_ROOTS` itself extended, not a hint. Anything git tracks outside the roots is never enumerated, so it never becomes a candidate; the hard-deny table and the scanner decide the rest, then you do. Anything containing real secrets (PATs, OAuth client IDs, refresh tokens, `xoxp-*` tokens) is dropped at step 3 or caught at step 4.
+**No scope hint, including an explicit path, reaches outside `PORTABLE_ROOTS`**: step 1 STOPs naming such a hint. This is a different mechanism from `.openbrain/template-ignore`, which declines specific paths *inside* the roots that the destination already has — **deliberate divergence only** (a vault's personalized keepers, home despite being upstream); a vault-only file needs no entry, because an unnamed new file is never offered: matching paths never become candidates here, and never arrive through `/pull-openbrain-template`; the enumerate block prints its count and list every run. Widening the scope means extending `PORTABLE_ROOTS` itself, never a hint. Anything containing real secrets (PATs, OAuth client IDs, refresh tokens, `xoxp-*` tokens) is dropped at step 3 or caught at step 4.
 
 ## Procedure
 
@@ -61,7 +61,7 @@ DEST_REF=refs/remotes/upstream/main   # the destination: what "already there" me
 DEP_UNION=   # push is strict: the dependency check resolves against the staged tree only (share sets `staging`) — re-export it with DEST_REF
 ```
 
-**a. Clone clean, on `main`, fetched.** The destination ref is fetched here, every run: `DEST_REF` is what "already there" means for new files, and a stale one reads a file upstream has since deleted as present, so it would skip the new-file confirm. The remote is `upstream`, or `origin` when the clone has none (a clone of the template itself), as in the pull skill's preflight.
+**a. Clone clean, on `main`, fetched.** The destination ref is fetched here, every run: `DEST_REF` is what "already there" means for new files. The remote is `upstream`, or `origin` when the clone has none (a clone of the template itself), as in the pull skill's preflight.
 
 ```bash
 # --- push-skill: clone ---
@@ -77,7 +77,7 @@ echo "DEST_REF=$DEST_REF ($UPR fetched just now, at $(git -C "$TEMPLATE" rev-par
 
 Re-export the `DEST_REF` it printed in every later block.
 
-**b. No vault configured as a remote of the clone.** A vault remote on the bench that pushes to public repos is a vault → clone → public leak path. The guard refuses on a local-path remote or a `.openbrain/vault-remotes` pattern match (the vault's pattern file is passed in as `VAULT_REMOTES_FILE`, unioned with the clone's if it has one), and refuses when it cannot determine the repo, is not run from its root, has zero remotes, or sees `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR` set. Its OK line states coverage: remote URL rows checked, patterns and pattern files applied. The vault's pattern file is passed only when it exists; a vault without one is told, in one line, that ssh/https-reached vaults are then undetectable. It is the **vault-resident** copy (`$VAULT/.openbrain/lib/`, vault-is-king — the same pattern as the pull skill's `receiving-pii-scan.sh`) run with the clone as its working directory: the clone's `main` does not carry the script until this PR merges, so running the clone's copy would STOP `127` on every machine. The file still ships in the PR so vaults created from the template carry it too.
+**b. No vault configured as a remote of the clone.** The guard refuses on a local-path remote or a `.openbrain/vault-remotes` pattern match (the vault's pattern file is passed in as `VAULT_REMOTES_FILE`, unioned with the clone's if it has one), and refuses when it cannot determine the repo, is not run from its root, has zero remotes, or sees `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR` set. Its OK line states coverage: remote URL rows checked, patterns and pattern files applied. The vault's pattern file is passed only when it exists; a vault without one is told, in one line, that ssh/https-reached vaults are then undetectable. It is the **vault-resident** copy (`$VAULT/.openbrain/lib/`) run with the clone as its working directory, never the clone's copy (why: `bootstrap/PII-SCAN-CONTRACT.md`, "Design notes").
 
 ```bash
 # --- push-skill: guard ---
@@ -95,7 +95,7 @@ case "$rc" in
 esac
 ```
 
-Three outcomes, never two: `0` checked and clean **and** the guard's own `OK — N remote URL row(s) checked` line is present (a zero-byte or truncated script also exits 0 — the exit code alone is not proof the check ran), `1` blocked, anything else (`2` cannot determine the repo, not at its root, zero remotes, cannot enumerate or parse its remotes, or a named pattern file is unreadable; `126` script unreadable or not a file; `127` script absent from the vault) is CANNOT-CHECK. A missing checker is never a passing one. The block also refuses when `VAULT` is not absolute or resolves to the clone — every block re-derives `VAULT="$(pwd)"`, so the shell must never be left inside the clone (0a's `cd` runs in a subshell for that reason).
+Three outcomes, never two: `0` checked and clean **and** the guard's own `OK — N remote URL row(s) checked` line is present, `1` blocked, anything else (`2` cannot determine the repo, not at its root, zero remotes, cannot enumerate or parse its remotes, or a named pattern file is unreadable; `126` script unreadable or not a file; `127` script absent from the vault) is CANNOT-CHECK. The block also refuses when `VAULT` is not absolute or resolves to the clone — every block re-derives `VAULT="$(pwd)"`, so the shell must never be left inside the clone.
 
 **c. The PII scanner is present and proves it can see.** `pii-scan --selftest` runs the exact configured pipeline against a canary name + email. Exit codes are the contract (`bootstrap/PII-SCAN-CONTRACT.md`): `0` works, anything else is **CANNOT-CHECK** — including `2` (no venv, wrong model, blind configuration) and `126`/`127` (not installed).
 
@@ -106,7 +106,7 @@ rc=0; pii-scan --selftest || rc=$?
 
 There is no patterns-only fallback. A machine that cannot run the scanner cannot push from this skill.
 
-**d. A private scratch dir for scan output.** Findings JSON quotes every detected identifier verbatim — it is as sensitive as what it describes. It lives here and nowhere else, and is deleted at the end of step 6 (or on any abort):
+**d. A private scratch dir for scan output.** Findings JSON quotes every detected identifier verbatim (contract, "Handling the output"). It lives here and nowhere else, and is deleted at the end of step 6 (or on any abort):
 
 ```bash
 find "${TMPDIR:-/tmp}" -maxdepth 1 -type d -name 'push-scan.*' -user "$(id -un)" -exec rm -rf {} +   # a previous aborted run's scratch, if any
@@ -117,9 +117,9 @@ Shell state does not survive between tool calls. Every later block starts by re-
 
 ### 1. Enumerate candidates from git, not the filesystem
 
-Ask each repo what it tracks or would track (`-c` cached, `-o` untracked-but-not-ignored). Gitignored paths cannot appear, deletions show, and no directory walker is ever handed a tree.
+Ask each repo what it tracks or would track (`-c` cached, `-o` untracked-but-not-ignored).
 
-The block sources the shared scope library and maps the scope hint (`HINT`, the `$1` the user typed) to a git pathspec **within `PORTABLE_ROOTS`**; `all` means the roots minus `PUSH_ALL_OMITS` (`bootstrap/` — push's own narrower rule; see the Scope table) — `git ls-files` is never run over the whole tree, and every scope, including a bare path hint, is filtered through `in_roots` afterward. There is no separate knob to turn that filtering off: `bootstrap/` reaches this skill by naming it (or a path under it) as the hint, and it's still in `PORTABLE_ROOTS`, so `in_roots` passes it through like anything else.
+The block sources the shared scope library and maps the scope hint (`HINT`, the `$1` the user typed) to a git pathspec **within `PORTABLE_ROOTS`**; `all` means the roots minus `PUSH_ALL_OMITS` (`bootstrap/` — push's own narrower rule; see the Scope table) — `git ls-files` is never run over the whole tree, and every scope, including a bare path hint, is filtered through `in_roots` afterward. No knob turns that filtering off: `bootstrap/` is reached by naming it (or a path under it) as the hint.
 
 ```bash
 # --- push-skill: enumerate ---
@@ -196,7 +196,7 @@ printf 'enumerated (hint=%s): vault %s paths (%s after roots+deny), template %s 
   "$(n "$SCAN_DIR/vault-only.lst")" "$(n "$SCAN_DIR/template-only.lst")" "$(n "$SCAN_DIR/differing.lst")"
 ```
 
-Always print that coverage line. The block stops by itself when either `*.ok` list is empty (wrong `VAULT`/`TEMPLATE`, bad pathspec, broken clone — not a clean result; for a single-path hint, when both are — a new or deleted file is empty on one side by nature) and when a path needs git quoting (a tab, quote or backslash in a filename would otherwise escape both the deny list and the scan). If `vault-only` and `differing` are both empty, stop too and say "nothing in scope differs" with the counts — never the word *clean*.
+Always print that coverage line. The block stops by itself when either `*.ok` list is empty (wrong `VAULT`/`TEMPLATE`, bad pathspec, broken clone — not a clean result; for a single-path hint, when both are — a new or deleted file is empty on one side by nature) and when a path needs git quoting (a tab, quote or backslash in a filename). If `vault-only` and `differing` are both empty, stop too and say "nothing in scope differs" with the counts — never the word *clean*.
 
 **New files go out only when named.** A path in the vault but absent at `DEST_REF` (upstream `main`) is dropped from both lists unless its exact path is in `named.lst`; the block prints `N files not at <dest> not considered; name a path to add` every run. Named ones are echoed back — "adding these N new files to <dest>: … OK?" — for **one explicit confirm**; only on a yes, copy `add.lst` to `add.ok`. Step 4 refuses any staged file absent at the destination that is not on a confirmed list matching step 1's.
 
@@ -332,7 +332,7 @@ In `--dry-run`, do exactly the same, but on a branch named `dry-run/<change-slug
 
 ### 4. Scan everything that will leave — content, not paths
 
-Two scanners, both mandatory: **`pii-scan`** (NER — names, emails, phones, locations, URLs; `gate` mode; no tuning flags exist and none are wanted, every earlier knob produced silent blindness) and **the pattern list** (deterministic — tokens, OAuth client IDs, Asana gids, 40-hex, home paths, plus the machine's own `.openbrain/local/pii-patterns` entries when that file exists in the clone). Their hits go to different readers: every NER hit to the agent (step 5b), every pattern hit to the human view (step 5c). What gets scanned:
+Two scanners, both mandatory: **`pii-scan`** (NER — names, emails, phones, locations, URLs; `gate` mode; no tuning flags — contract, "There are no knobs that narrow a scan") and **the pattern list** (deterministic — tokens, OAuth client IDs, Asana gids, 40-hex, home paths, plus the machine's own `.openbrain/local/pii-patterns` entries when that file exists in the clone). Their hits go to different readers: every NER hit to the agent (step 5b), every pattern hit to the human view (step 5c). What gets scanned:
 
 - the **staged blob** of every new, copied or renamed file (the index is what the commit carries; the worktree copy is not)
 - the **added lines** of every modified file (the diff hunks — what actually leaves)
@@ -341,7 +341,7 @@ Two scanners, both mandatory: **`pii-scan`** (NER — names, emails, phones, loc
 
 Not scanned, published by design: the commit **author** (`user.name`/`user.email` of the clone). A PR carries its author; if that identity should differ from your vault's, set it in the clone (`git config user.name …`) before committing.
 
-`BASE` must be exported explicitly — `main` for a plain change, the parent PR branch for a stacked one; the block refuses to guess, because a scan against the wrong base attests to a span that is not the one published. The clone's `.openbrain/local/pii-patterns`, when it exists, is one entry per line, matched after Unicode NFC normalization and casefolding on both sides (so `josé` matches `JOSÉ`, and an NFD-written entry matches NFC text): a plain entry as a substring, a `word:` entry as a whole word (letters, digits and `_` delimit it, so `word:rail` never fires on "trailing"); `#` comments and blank lines ignored; the coverage header states how many entries were live, or `absent`.
+`BASE` must be exported explicitly — `main` for a plain change, the parent PR branch for a stacked one; the block refuses to guess. The clone's `.openbrain/local/pii-patterns`, when it exists, is matched as the contract's "The `pii-patterns` list" says (NFC + casefold on both sides; a plain entry as a substring, a `word:` entry as a whole word); the coverage header states how many entries were live, or `absent`.
 
 ```bash
 # --- push-skill: scan ---
@@ -352,9 +352,8 @@ umask 077; cd "${TEMPLATE:?}" || exit 1
 PATTERNS='xox[pbea]-|[0-9]/[0-9]{10,}[:/]|apps\.googleusercontent\.com|ASANA_PAT_[A-Z]+=.|[0-9a-f]{40}|/Users/[^/ ]+|[0-9]{16}'
 # Hosts whose plain documentation links may be dispositioned as ONE grouped prompt per file. Literal, edited by the
 # repo owner only. A URL is groupable only if its host is exactly here AND it has no query string, no fragment and no
-# path segment holding an opaque id — split each segment on - _ . and ask if any token is >=16 chars of [A-Za-z0-9];
-# testing the whole segment instead calls en.wikipedia.org/wiki/Named-entity_recognition (24 chars) an id and
-# un-groups the very documentation links this exists to collapse. A share link, token or document id stays single.
+# path segment holding an opaque id (split on - _ . first; any token >=16 chars of [A-Za-z0-9]) — contract, "The one
+# sanctioned grouping". A share link, token or document id stays single.
 URL_GROUP_HOSTS='github.com docs.claude.com code.claude.com developer.mozilla.org en.wikipedia.org'
 : > "$SCAN_DIR/coverage.txt"; : > "$SCAN_DIR/findings.idx"; : > "$SCAN_DIR/hits.idx"; rm -f "$SCAN_DIR/local-patterns.txt" "$SCAN_DIR/local-words.txt" "$SCAN_DIR/ner.txt" "$SCAN_DIR/patterns.txt" "$SCAN_DIR/scan.ok" "$SCAN_DIR/scan-notes.txt" "$SCAN_DIR/flags.txt"   # a re-run never reads the last run's hits, nor the last flag pass's reply
 shred_findings() {   # the sensitive artefacts, never the operator's drafts. find, not globs: an unmatched glob aborts the whole rm under zsh
@@ -369,7 +368,6 @@ LIB="${VAULT:?}/.openbrain/lib/template-scope.sh"
 [ -f "$LIB" ] || stop "template-scope.sh missing at $LIB; restore it from git, or re-pull the template — it ships alongside /push-openbrain-template"
 source "$LIB"
 typeset -f deny >/dev/null 2>&1 && typeset -f in_roots >/dev/null 2>&1 && typeset -f pii_patterns >/dev/null 2>&1 && typeset -f pii_match >/dev/null 2>&1 || stop "template-scope.sh sourced but deny()/in_roots()/pii_patterns()/pii_match() did not load"   # the hard-deny list, re-applied here to what is actually staged; same function step 1 sourced. in_roots isn't used in this block, but the load check still verifies BOTH functions loaded — a lib that half-loaded is broken, not half-usable
-# the clone's own per-machine pattern list, when it has one — normalized once (BOM, CR, comments, `word:` prefix, padding)
 # the vault's pii-patterns sync, when this vault has it: regenerate the clone copy from the vault copy BEFORE it is read,
 # so a mid-session vault edit is live. Absent (a template vault) is stated, never skipped silently; rc 20 stops.
 PSYNC="$VAULT/.openbrain/lib/pii-patterns-sync.sh"
@@ -379,10 +377,11 @@ if [ -f "$PSYNC" ]; then
   case "$psrc" in 0|3) PSYNC_STATE="ok (rc $psrc)" ;; 10) PSYNC_STATE="WARN — the clone copy was NOT regenerated (it holds entries the vault copy lacks); scanned as is" ;;
     *) stop "pii-patterns sync failed (rc $psrc) — the clone copy may be stale; fix it and re-run" ;; esac
 else PSYNC_STATE="MISSING — no $PSYNC (a template vault has none); the clone copy is scanned as is"; echo "pii-patterns sync: $PSYNC_STATE"; fi
+# the clone's own per-machine pattern list, when it has one — normalized once (BOM, CR, comments, `word:` prefix, padding)
 LOCAL_N=absent
 if [ -f .openbrain/local/pii-patterns ]; then
-  pii_patterns .openbrain/local/pii-patterns > "$SCAN_DIR/local-patterns.norm" || stop "could not read .openbrain/local/pii-patterns"   # the shared normalizer in template-scope.sh (pull's incoming scan reads the file the same way)
-  { LC_ALL=C command grep -v '^word:' "$SCAN_DIR/local-patterns.norm" > "$SCAN_DIR/local-patterns.txt"; [ $? -le 1 ]; } && LC_ALL=C sed -n 's/^word://p' "$SCAN_DIR/local-patterns.norm" > "$SCAN_DIR/local-words.txt" && rm -f "$SCAN_DIR/local-patterns.norm" || stop "could not stage the normalized pattern list"   # plain entries: substring; word: entries: whole word (grep -w), as pull's incoming scan matches them
+  pii_patterns .openbrain/local/pii-patterns > "$SCAN_DIR/local-patterns.norm" || stop "could not read .openbrain/local/pii-patterns"   # the shared normalizer in template-scope.sh
+  { LC_ALL=C command grep -v '^word:' "$SCAN_DIR/local-patterns.norm" > "$SCAN_DIR/local-patterns.txt"; [ $? -le 1 ]; } && LC_ALL=C sed -n 's/^word://p' "$SCAN_DIR/local-patterns.norm" > "$SCAN_DIR/local-words.txt" && rm -f "$SCAN_DIR/local-patterns.norm" || stop "could not stage the normalized pattern list"   # plain entries: substring; word: entries: whole word (grep -w)
   LOCAL_N=$(( $(wc -l < "$SCAN_DIR/local-patterns.txt") + $(wc -l < "$SCAN_DIR/local-words.txt") ))
 fi
 scan() {                       # scan <label> <textfile> [<linemap>]  → records outcome; findings never exit, errors always do
@@ -553,7 +552,7 @@ sd = sys.argv[1]
 hits = []
 for row in open(os.path.join(sd, "hits.idx"), encoding="utf-8"):
     hits += [json.loads(l) for l in open(row.rstrip("\n").split("\t")[1], encoding="utf-8")]
-show = lambda t: t.replace("\\", "\\\\").replace("\n", "\\n")   # one item per line: a hit spanning lines shows its \n
+show = lambda t: t.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r")   # one item per line: a hit spanning lines shows its \n (\r)
 loc = lambda h: "%s:%s" % (h["file"], h["line"])
 for h in hits:
     if " | " in loc(h) or ", " in loc(h): sys.exit("CANNOT-CHECK — a location holds ' | ' or ', ', which would break the lists: " + loc(h))
@@ -585,18 +584,18 @@ echo "NER list (the agent's): $SCAN_DIR/ner.txt · pattern hits (the view's): $S
 
 Rules for what happens next:
 
-- **Exit `2`, `126`, `127` or anything but `0`/`1` from the scanner is CANNOT-CHECK** — the block above stops and deletes the scratch dir. Do not re-run with a pattern-only "fallback"; fix the scanner (`bootstrap/lib/install-pii-scan.sh`) and start over. A binary or non-UTF-8 file in the change is CANNOT-CHECK too: the block tests every text for NUL bytes before any `grep` reads it (a `grep` that skips binary input would call it empty and skip it), and the scanner refuses NUL bytes rather than scan gibberish. Drop that file from the change. Every `grep` in these blocks is `command grep`, so a shell function named `grep` (the Claude Code session defines one) never answers for it.
-- **Read the findings only from the two lists the block writes** — `$SCAN_DIR/ner.txt` (the agent's) and `$SCAN_DIR/patterns.txt` (the view's) — and the per-label `*.json`, `*.urls`, `*.pat` and `*.hits` behind them with `Read` when a decision needs the detail; nothing else there (`local-patterns.txt` and `local-words.txt` are the machine's own pattern list, not findings). No wholesale `cat` of a JSON file into the conversation. Never paste a finding, a JSON excerpt or a matched line into a PR comment, a commit message, the report, or anything that leaves this machine. The `coverage.txt` lines — labels, byte counts, exit codes, hit counts — are the only scan output that may be quoted. (The Claude Code transcript is local and already holds the vault's own content; `.claude/projects/` is hard-denied above so it never travels.)
+- **Exit `2`, `126`, `127` or anything but `0`/`1` from the scanner is CANNOT-CHECK** — the block above stops and deletes the scratch dir. Do not re-run with a pattern-only "fallback"; fix the scanner (`bootstrap/lib/install-pii-scan.sh`) and start over. A binary or non-UTF-8 file in the change is CANNOT-CHECK too: drop that file from the change.
+- **Read the findings only from the two lists the block writes** — `$SCAN_DIR/ner.txt` (the agent's) and `$SCAN_DIR/patterns.txt` (the view's) — and the per-label `*.json`, `*.urls`, `*.pat` and `*.hits` behind them with `Read` when a decision needs the detail; nothing else there (`local-patterns.txt` and `local-words.txt` are the machine's own pattern list, not findings). No wholesale `cat` of a JSON file into the conversation. Never paste a finding, a JSON excerpt or a matched line into a PR comment, a commit message, the report, or anything that leaves this machine. The `coverage.txt` lines — labels, byte counts, exit codes, hit counts — are the only scan output that may be quoted.
 - **No question is asked here, and nothing is routed.** The block lists **every** hit with its `file:line` (it stops if the count listed differs from the count found), and nothing carries over to the next run:
-  - **NER hits → the agent.** `ner.txt` holds one item per distinct `(type, text)`, `n<k> | <TYPE> | <file>:<line>, … | «<text>»`, every place it occurs listed (files, `commit-msg`, `pr-title`, `pr-body`, `branch-name`, `path-list`). Nothing is counted away first — no filename, code-shape or declared-fake class: the agent answers `ok` or `flag` for every id (step 5b, checked), applying the declared-fakes rule its brief carries. NER hits are not shown to the human.
+  - **NER hits → the agent.** `ner.txt` holds one item per distinct `(type, text)`, `n<k> | <TYPE> | <file>:<line>, … | «<text>»`, every place it occurs listed (files, `commit-msg`, `pr-title`, `pr-body`, `branch-name`, `path-list`). Nothing is counted away first: the agent answers `ok` or `flag` for every id (step 5b, checked), applying the declared-fakes rule its brief carries. NER hits are not shown to the human.
   - **Pattern hits → the human view.** `patterns.txt` holds one line per hit, `<file>:<line> | «<the matched line>»`. They are deterministic, so they go straight to the view (step 5c) beside the agent's flags; each is a decision.
-- **Never auto-block on a count and never auto-accept.** Source code is noisy: `--git` scores 0.85 as `PERSON`, the same as a real name. The agent reads past that noise; the human reads the agent's flags and the pattern hits.
+- **Never auto-block on a count and never auto-accept.** NER is noisy on source code and its scores cannot separate junk from a real name (contract, "Precision"). The agent reads past that noise; the human reads the agent's flags and the pattern hits.
 
 In `--dry-run`, this step runs in full on the `dry-run/<change-slug>` branch from step 3 and prints coverage and the `scan:` line, and the run continues to step 5, which ends it (`push-skill: dry-run-end`).
 
 ### 5. Final check — scanners, an agent flag pass, then the human
 
-This is **mandatory**. The scanners do not replace it: NER cannot tell a real colleague's first name from an example, misses handles, client names, codenames and deal amounts outright, and the pattern list only knows what someone enumerated. The agent is the primary detector; three passes, in order:
+This is **mandatory**. The scanners do not replace it: NER misses whole classes of leak outright (contract, "Outbound"), and the pattern list only knows what someone enumerated. The agent is the primary detector; three passes, in order:
 
 1. **Scanners** — step 4: NER hits listed for the agent, pattern hits listed for the human.
 2. **Agent flag pass** — a reader with no stake in the port reads every added line of the outgoing diff, the commit message and the PR title and body for personal or business context, and answers every item of two lists: the **new-vocabulary list** (its focus list: every added prose line, code token, filename-like string and path segment holding a word or name the base tree has never contained) and the **NER list** from step 4.
@@ -613,175 +612,29 @@ rm -f "$SCAN_DIR/full.diff" "$SCAN_DIR/vocab.txt" "$SCAN_DIR/paths-5a.txt" "$SCA
   || { echo "STOP: CANNOT-CHECK — the step-4 scan was of other content (the change or its message moved since); re-run step 4"; exit 1; }
 git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --cached "$BASE" > "$SCAN_DIR/full.diff" || { echo "STOP: CANNOT-CHECK — git diff against $BASE failed"; exit 1; }
 [ -s "$SCAN_DIR/full.diff" ] || { echo "STOP: CANNOT-CHECK — nothing staged against $BASE; there is nothing to read"; exit 1; }
-FILE_EXTS='md sh py json txt tsv csv yml yaml toml js ts mjs lst log diff patch example html css plist'   # the same literal as step 4's
 git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --cached --name-only -z --no-renames "$BASE" > "$SCAN_DIR/paths-5a.txt" || { echo "STOP: CANNOT-CHECK — git diff --name-only against $BASE failed"; exit 1; }
-python3 - "$SCAN_DIR/full.diff" "$BASE" "$SCAN_DIR/paths-5a.txt" "$FILE_EXTS" > "$SCAN_DIR/vocab.txt" <<'PY' || { echo "STOP: CANNOT-CHECK — vocabulary builder failed (reading the tree at $BASE, or an unparseable diff)"; exit 1; }
-import re, subprocess, sys
-diff, base, pathsz, exts = sys.argv[1], sys.argv[2], sys.argv[3], set(sys.argv[4].split())
-PROSE = (".md", ".txt", ".example")    # every added line of these is prose; elsewhere, whole comment lines only
-TOK = re.compile(r"[A-Za-z0-9_'-]+")
-toks = lambda t: [w.strip("'-") for w in TOK.findall(t) if len(w.strip("'-")) >= 3]
-# the base-tree vocabulary: every token of every text blob at BASE, lowercased — no dictionary filter
-ls = subprocess.run(["git", "ls-tree", "-r", "-z", base], capture_output=True, check=True).stdout.split(b"\0")
-oids = [e.split(b"\t")[0].split()[2] for e in ls if e and e.split(b"\t")[0].split()[1] == b"blob"]
-if not oids: sys.exit("no blobs at " + base)
-cat = subprocess.run(["git", "cat-file", "--batch"], input=b"".join(o + b"\n" for o in oids), capture_output=True, check=True).stdout
-vocab, i = set(), 0
-while i < len(cat):
-    j = cat.index(b"\n", i); size = int(cat[i:j].split()[2]); blob = cat[j + 1:j + 1 + size]; i = j + 2 + size
-    if b"\0" not in blob: vocab.update(w.lower() for w in toks(blob.decode("utf-8", "replace")))
-added, cur, n, hdr, order = [], None, 0, False, {}
-for raw in open(diff, encoding="utf-8", errors="replace"):
-    l = raw.rstrip("\n")
-    if l.startswith("diff --git "): hdr = True; cur = None; continue
-    if hdr and l.startswith("+++ "):
-        cur = None if l == "+++ /dev/null" else l[6:].rstrip("\t"); order.setdefault(cur, len(order)); continue
-    if l.startswith("@@"): hdr = False; n = int(re.match(r"@@ -\S+ \+(\d+)", l).group(1)); continue
-    if hdr or cur is None: continue
-    if l.startswith("+"): added.append((cur, n, l[1:])); n += 1
-    elif not l.startswith(("-", "\\")): n += 1
-def prose(f, t):
-    s = t.strip()
-    if f.endswith(PROSE): return True
-    return (s.startswith("#") and not s.startswith("#!")) or s.startswith(("//", "<!--"))
-rows, code, fnames = [], {}, {}
-FNAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*\.([A-Za-z0-9]+)")
-for f, n, t in added:
-    new = [w for w in toks(t) if w.lower() not in vocab]
-    if not new: continue
-    if prose(f, t):
-        cap = any(w[0].isupper() for w in new); num = any(c.isdigit() for w in new for c in w)
-        rows.append(((not cap, not num, -len(set(new)), order[f], n), f, n, t.strip(), new))
-    else:   # code lines: each new identifier-looking token once, at its first place (a prose line is never listed twice)
-        for w in new:
-            if re.search(r"_|[a-z][A-Z]|[A-Za-z][0-9]|[0-9][A-Za-z]", w): code.setdefault(w, (f, n))
-        for m in FNAME.finditer(t):   # a filename-like string on a code line: its new words (the scanner counts the name itself)
-            if m.group(1).lower() not in exts: continue
-            nw = [w for w in re.split(r"[-_.]", m.group(0)[:-len(m.group(1)) - 1]) if len(w) >= 3 and w.lower() not in vocab]
-            if nw: fnames.setdefault(m.group(0), (f, n, nw))
-# new path segments: a directory or file name of this change that no path at BASE contains
-bsegs = set(s for p in subprocess.run(["git", "ls-tree", "-r", "-z", "--name-only", base], capture_output=True, check=True).stdout.decode("utf-8", "replace").split("\0") if p for s in p.split("/"))
-segs = {}
-for p in open(pathsz, "rb").read().decode("utf-8", "replace").split("\0"):
-    for sg in (p.split("/") if p else []):
-        if sg not in bsegs: segs.setdefault(sg, p)
-# one entry per line, each with an id: capitalized new tokens first, then numbers, then most new tokens; then path
-# segments, filename words and code tokens
-out = ["%s:%d | %s | new: %s" % (f, n, t, ", ".join(dict.fromkeys(new))) for _, f, n, t, new in sorted(rows)]
-out += ["%s:path | (path segment) %s | new: %s" % (p, sg, sg) for sg, p in sorted(segs.items())]
-out += ["%s:%d | (filename) %s | new: %s" % (f, n, nm, ", ".join(dict.fromkeys(nw))) for nm, (f, n, nw) in sorted(fnames.items())]
-out += ["%s:%d | (code token) %s | new: %s" % (f, n, w, w) for w, (f, n) in sorted(code.items())]
-for i, l in enumerate(out, 1): print("v%d | %s" % (i, l))
-PY
-# the agent's brief, generated: the fakes rule is built from bootstrap/lib/pii-fakes.txt at every run, never written into this skill
-FAKES="${VAULT:?}/bootstrap/lib/pii-fakes.txt"
-[ -s "$FAKES" ] || { echo "STOP: CANNOT-CHECK — the declared-fakes list is missing at $FAKES; restore it from git (it ships with the scanner contract)"; exit 1; }
-python3 - "$FAKES" "$SCAN_DIR" > "$SCAN_DIR/brief.txt" <<'PY' || { cat "$SCAN_DIR/brief.txt" >&2; rm -f "$SCAN_DIR/brief.txt"; echo "STOP: CANNOT-CHECK — could not build the agent brief from $FAKES (see above)"; exit 1; }
-import re, sys
-fakesf, sd = sys.argv[1], sys.argv[2]
-L = [l.rstrip("\n") for l in open(fakesf, encoding="utf-8")]
-exact, regs = [], []
-for i, l in enumerate(L):
-    if not l.strip() or l.lstrip().startswith("#"): continue
-    if l.startswith("exact:"): exact.append(l[6:]); continue
-    if l.startswith("re:"):
-        try: re.compile(l[3:])
-        except re.error as e: print("pii-fakes.txt line %d: re: entry does not compile (%s)" % (i + 1, e)); sys.exit(1)
-        m = L[i - 1] if i else ""
-        if not m.startswith("# means:") or not m[8:].strip(): print("pii-fakes.txt line %d: re: entry has no '# means:' line directly above it — every pattern carries its plain meaning" % (i + 1)); sys.exit(1)
-        regs.append((l[3:], m[8:].strip())); continue
-    print("pii-fakes.txt line %d: entry is neither exact: nor re:" % (i + 1)); sys.exit(1)
-if not exact or not regs: print("pii-fakes.txt holds no exact: or no re: entries"); sys.exit(1)
-P = lambda f: "%s/%s" % (sd, f)
-print("""You are reviewing a change that is about to be published in a public repository. Read these files, and only these:
-- the diff: %s
-- its focus list: %s — one item per line, `<id> | <file>:<line> | <text> | new: <words>`: added lines, path segments, filename words and code tokens holding words the rest of the repository never uses (`<line>` is `path` for a path segment)
-- the NER list: %s — one item per line, `<id> | <type> | <file>:<line>, … | «<text>»`: every distinct string a name/email/phone/URL detector found in the change, the commit message, the PR title and body, the branch name and the path list, with every place it occurs
-- the commit message: %s · the PR title: %s · the PR body: %s · the branch name: %s — they are published too
-
-The NER list supplements your read; it is not the checklist. Read every added line. Read every line of the commit message, the PR title, the PR body and the branch name.
-
-Look for anything that could be personal or business context for the person publishing it: names of real people, emails, phones, handles, account slugs or ids; employer, client, product or project names that are not this tool's own; places and addresses; private paths, hostnames, repo or machine names; internal labels and codenames; money, deals, health, HR, family or schedule details; anything that only makes sense inside one person's notes. The tool's own vocabulary (its skill names, commands, file names) is fine.
-
-Declared fakes are the only strings that are fine because they are fake. A string is a declared fake ONLY if the whole string equals one of these exactly:""" % (P("full.diff"), P("vocab.txt"), P("ner.txt"), P("commit-msg.txt"), P("pr-title.txt"), P("pr-body.txt"), P("branch.txt")))
-for e in exact: print("  - «%s»" % e)
-print("or the whole string fully matches one of these patterns (Python re.fullmatch), each shown with what it means:")
-for r, m in regs: print("  - `%s` — %s" % (r, m))
-print("""Anything else is not a fake: a part of a fake (a bare first name is not one), a near miss (`Jane Doe`; `Acme-Health` is not `Acme Corp`), a fake shape carrying a real-looking piece (a real name in an example.com path or subdomain). If you are not sure, flag it.
-
-Reply with exactly:
-- one line per focus item and per NER item, in any order: `<id> | ok | <reason, one phrase>` or `<id> | flag | <reason, one phrase>` — every v-id and every n-id once, no other ids;
-- then, for any other line you would flag — an added line (a `+` line inside a hunk) or a line of the commit message, PR title, PR body or branch name — one line `<file>:<line> | <the line> | <reason, one phrase>` (`<file>` is the diff's path and `<line>` its new-file line number, or `commit-msg`, `pr-title`, `pr-body` or `branch-name` and the line number in that file);
-- then `none found` if nothing at all is flagged.
-Nothing else: no totals, no summary.""")
-PY
+FP="${VAULT:?}/.openbrain/lib/flag-pass.sh"; [ -f "$FP" ] || { echo "STOP: CANNOT-CHECK — .openbrain/lib/flag-pass.sh is missing or did not load; it ships with /push-openbrain-template — restore it from the template (git checkout <template>/main -- .openbrain/lib/flag-pass.sh)"; exit 1; }
+. "$FP"; typeset -f focus_brief >/dev/null 2>&1 && typeset -f flags_check >/dev/null 2>&1 || { echo "STOP: CANNOT-CHECK — .openbrain/lib/flag-pass.sh is missing or did not load; it ships with /push-openbrain-template — restore it from the template (git checkout <template>/main -- .openbrain/lib/flag-pass.sh)"; exit 1; }
+focus_brief || exit 1   # the focus list and the brief, from .openbrain/lib/flag-pass.sh
+[ -s "$SCAN_DIR/brief.txt" ] && [ -f "$SCAN_DIR/vocab.txt" ] || { echo "STOP: CANNOT-CHECK — focus_brief wrote no brief.txt or vocab.txt"; exit 1; }
 echo "full diff: $SCAN_DIR/full.diff  ($(wc -l < "$SCAN_DIR/full.diff" | tr -d ' ') lines)"
 echo "new-vocabulary list: $SCAN_DIR/vocab.txt  ($(wc -l < "$SCAN_DIR/vocab.txt" | tr -d ' ') entries) — the flag pass's focus list"
 echo "NER list: $SCAN_DIR/ner.txt  ($(wc -l < "$SCAN_DIR/ner.txt" | tr -d ' ') items, from step 4)"
-echo "agent brief: $SCAN_DIR/brief.txt  (fakes rule from $FAKES)"
+echo "agent brief: $SCAN_DIR/brief.txt  (fakes rule from $VAULT/$FLAG_PASS_FAKES_REL)"
 ```
 
 #### 5b. Agent flag pass
 
-Spawn a **fresh subagent** (no prior context — never a fork of this session) and give it **only** the text of `$SCAN_DIR/brief.txt`, verbatim (it names the seven files the agent reads: the diff, the focus list, the NER list, the commit message, the PR title, the PR body and the branch name), plus one line naming the user's own identifiers you already know (name, employer, email domains), so it can recognise them. Give it none of the porting reasoning: it is useful because it does not know what you meant to keep. The brief is generated by 5a at every run; its declared-fakes rule is built from `bootstrap/lib/pii-fakes.txt`, never written into this skill. Where the substrate has no subagents, do the pass yourself as a separate step, reading only those seven files, and say so on the `mode:` line.
+Spawn a **fresh subagent** (no prior context — never a fork of this session) and give it **only** the text of `$SCAN_DIR/brief.txt`, verbatim (it names the seven files the agent reads: the diff, the focus list, the NER list, the commit message, the PR title, the PR body and the branch name), plus one line naming the user's own identifiers you already know (name, employer, email domains), so it can recognise them. Give it none of the porting reasoning: it is useful because it does not know what you meant to keep. The brief is generated by 5a at every run, its declared-fakes rule from `bootstrap/lib/pii-fakes.txt`. Where the substrate has no subagents, do the pass yourself as a separate step, reading only those seven files, and say so on the `mode:` line.
 
-Save its reply verbatim to `$SCAN_DIR/flags.txt`, with a first line `mode: subagent` or `mode: same-agent`, then check it. The agent counts nothing — the check computes the file and added-line totals from the diff itself — and it answers for three things: its item lines are **exactly** the ids of the focus list and of the NER list (a missing, extra or repeated id is CANNOT-CHECK: a skipped NER id is a STOP, never a pass), every other flag points at a real added `file:line` or a real line of the commit message, PR title, PR body or branch name, and the reply says `none found` when it flags nothing. A reply that skipped items, invented locations or said nothing is caught, not trusted:
+Save its reply verbatim to `$SCAN_DIR/flags.txt`, with a first line `mode: subagent` or `mode: same-agent`, then check it. The agent counts nothing — the check computes the file and added-line totals from the diff itself — and it answers for four things: its item lines are **exactly** the ids of the focus list and of the NER list (a missing, extra or repeated id is CANNOT-CHECK: a skipped NER id is a STOP, never a pass), every other flag points at a real added `file:line` or a real line of the commit message, PR title, PR body or branch name, every flag's text is on what it cites (the focus item without its label, or its line or path; the NER item's text, unescaped; the cited line) as whole words — the rule the brief declares: at least 2 characters, one a letter or digit, no letter, digit or combining mark running on past either end (camelCase steps break: `get|ACME|Token`, `HTTP|Server`; so does a source escape ending right before it, `\u00a0|Name`, never decoded), NFC-normalised, any whitespace run as one space, otherwise verbatim, and the reply says `none found` when it flags nothing:
 
 ```bash
 # --- push-skill: flags-check ---
-: "${SCAN_DIR:?}"; F="$SCAN_DIR/flags.txt"; rm -f "$SCAN_DIR/flags.ok"
-[ -s "$SCAN_DIR/full.diff" ] && [ -f "$SCAN_DIR/vocab.txt" ] || { echo "STOP: CANNOT-CHECK — full.diff or vocab.txt missing in $SCAN_DIR; run 5a first"; exit 1; }
-[ -f "$SCAN_DIR/ner.txt" ] || { echo "STOP: CANNOT-CHECK — ner.txt missing in $SCAN_DIR; the NER list is step 4's output — run step 4 and 5a again (an absent list is never 'no NER items')"; exit 1; }
-for t in commit-msg pr-title pr-body branch; do [ -f "$SCAN_DIR/$t.txt" ] || { echo "STOP: CANNOT-CHECK — $t.txt missing in $SCAN_DIR; the flag pass read it (step 4 writes branch.txt)"; exit 1; }; done
-[ -s "$F" ] || { echo "STOP: CANNOT-CHECK — $F missing or empty; the flag pass has not run"; exit 1; }
-python3 - "$SCAN_DIR/full.diff" "$F" "$SCAN_DIR/vocab.txt" "$SCAN_DIR/ner.txt" "$SCAN_DIR" <<'PY' && { cat "$SCAN_DIR/full.diff" "$SCAN_DIR/commit-msg.txt" "$SCAN_DIR/pr-title.txt" "$SCAN_DIR/pr-body.txt" "$SCAN_DIR/branch.txt" | cksum > "$SCAN_DIR/flags.ok"; } || { rm -f "$SCAN_DIR/flags.ok"; echo "STOP: CANNOT-CHECK — the flag pass output does not match the diff, the focus list or the NER list (above); re-run the pass"; exit 1; }
-import os, re, sys
-from collections import Counter
-files, added, cur, n, hdr = [], set(), None, 0, False
-for raw in open(sys.argv[1], encoding="utf-8", errors="replace"):
-    l = raw.rstrip("\n")
-    if l.startswith("diff --git "): hdr = True; cur = None; files.append(None); continue
-    if hdr and l.startswith("+++ "): cur = None if l == "+++ /dev/null" else l[6:].rstrip("\t"); continue
-    if l.startswith("@@"): hdr = False; n = int(re.match(r"@@ -\S+ \+(\d+)", l).group(1)); continue
-    if hdr or cur is None: continue
-    if l.startswith("+"): added.add((cur, n)); n += 1
-    elif not l.startswith(("-", "\\")): n += 1
-msgl = {}
-for t, f in (("commit-msg", "commit-msg"), ("pr-title", "pr-title"), ("pr-body", "pr-body"), ("branch-name", "branch")):
-    msgl[t] = len(open(os.path.join(sys.argv[5], f + ".txt"), encoding="utf-8", errors="replace").read().splitlines())
-vids = [l.split(" | ", 1)[0] for l in open(sys.argv[3], encoding="utf-8", errors="replace") if l.strip()]
-nids = [l.split(" | ", 1)[0] for l in open(sys.argv[4], encoding="utf-8", errors="replace") if l.strip()]
-lines = [l.rstrip("\n") for l in open(sys.argv[2], encoding="utf-8", errors="replace")]
-bad = []
-if not lines or not re.fullmatch(r"mode: (subagent|same-agent)", lines[0]): bad.append("first line is not 'mode: subagent' or 'mode: same-agent'")
-items, free, none = [], [], False
-for l in lines[1:]:
-    if not l.strip(): continue
-    m = re.fullmatch(r"([vn]\d+) \| (ok|flag) \| (.+)", l.strip())
-    if m: items.append(m.groups()); continue
-    if l.strip() == "none found": none = True; continue
-    if l.startswith("coverage:"): continue   # an agent's own totals are ignored, never trusted: the counts below come from the diff
-    if " | " in l: free.append(l); continue
-    bad.append("unparseable line (not an item, a flag or 'none found'): " + l[:60])
-got = Counter(i for i, _, _ in items); key = lambda x: (x[0], int(x[1:]))
-miss = lambda want: sorted(set(want) - set(got), key=key)
-if miss(vids): bad.append("focus items with no line: " + ", ".join(miss(vids)))
-if miss(nids): bad.append("NER items with no line: " + ", ".join(miss(nids)))
-extra = sorted(set(got) - set(vids) - set(nids), key=key); dup = sorted((i for i, c in got.items() if c > 1), key=key)
-if extra: bad.append("ids not on the focus or NER list: " + ", ".join(extra))
-if dup: bad.append("ids answered more than once: " + ", ".join(dup))
-for l in free:
-    loc = l.split(" | ", 1)[0]; f, _, ln = loc.rpartition(":")
-    ok = ln.isdigit() and ((f, int(ln)) in added or (f in msgl and 1 <= int(ln) <= msgl[f]))
-    if not ok: bad.append("flag points at no added line or message line: " + loc)
-nflag = sum(1 for _, v, _ in items if v == "flag") + len(free)
-if nflag and none: bad.append("both flags and 'none found'")
-if not nflag and not none: bad.append("no flags and no explicit 'none found'")
-if bad: print("\n".join("  - " + b for b in bad)); sys.exit(1)
-print("flag pass (%s): %s — %d/%d focus items and %d/%d NER items answered; the diff has %d file(s), %d added line(s); messages read: commit-msg %d, pr-title %d, pr-body %d, branch-name %d line(s)"
-      % (lines[0][6:], "FINDINGS, %d flag(s)" % nflag if nflag else "CLEAN, none found", len(set(got) & set(vids)), len(set(vids)), len(set(got) & set(nids)), len(set(nids)),
-         len(files), len(added), msgl["commit-msg"], msgl["pr-title"], msgl["pr-body"], msgl["branch-name"]))
-PY
+: "${SCAN_DIR:?}"; rm -f "$SCAN_DIR/flags.ok"   # FIRST: a run that stops at the preflight below leaves no stale pass
+FP="${VAULT:?}/.openbrain/lib/flag-pass.sh"; [ -f "$FP" ] || { echo "STOP: CANNOT-CHECK — .openbrain/lib/flag-pass.sh is missing or did not load; it ships with /push-openbrain-template — restore it from the template (git checkout <template>/main -- .openbrain/lib/flag-pass.sh)"; exit 1; }
+. "$FP"; typeset -f focus_brief >/dev/null 2>&1 && typeset -f flags_check >/dev/null 2>&1 || { echo "STOP: CANNOT-CHECK — .openbrain/lib/flag-pass.sh is missing or did not load; it ships with /push-openbrain-template — restore it from the template (git checkout <template>/main -- .openbrain/lib/flag-pass.sh)"; exit 1; }
+flags_check || exit 1   # the reply check, from .openbrain/lib/flag-pass.sh
 ```
 
 #### 5c. The human view
@@ -797,8 +650,8 @@ S="$({ git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv -
 [ "$S" = "$(cat "$SCAN_DIR/flags.ok")" ] && [ "$(cat "$SCAN_DIR/full.diff" "$SCAN_DIR/commit-msg.txt" "$SCAN_DIR/pr-title.txt" "$SCAN_DIR/pr-body.txt" "$SCAN_DIR/branch.txt" | cksum)" = "$S" ] \
   || { echo "STOP: CANNOT-CHECK — the flag pass read other content (the change or its messages moved since 5a); re-run step 4, 5a and 5b"; exit 1; }
 [ "$S" = "$(cat "$SCAN_DIR/scan.ok")" ] || { echo "STOP: CANNOT-CHECK — the step-4 scan was of other content (the change or its message moved since); re-run step 4, 5a and 5b"; exit 1; }
-python3 - "$SCAN_DIR" "$BASE" > "$SCAN_DIR/digest.txt" <<'PY' || { echo "STOP: CANNOT-CHECK — could not build the view (an unparseable diff, list or reply)"; exit 1; }
-import os, re, sys
+python3 - "$SCAN_DIR" "$BASE" > "$SCAN_DIR/digest.txt" <<'PY' || { rm -f "$SCAN_DIR/digest.txt" "$SCAN_DIR/flags.ok"; echo "STOP: CANNOT-CHECK — could not build the view (an unparseable diff, list or reply, or a flag the view did not show — above)"; exit 1; }
+import os, re, sys, unicodedata
 sd, base = sys.argv[1], sys.argv[2]
 rd = lambda f: [l.rstrip("\n") for l in open(os.path.join(sd, f), encoding="utf-8", errors="replace")]
 files, hdr, text, order = [], False, {}, {}
@@ -825,58 +678,105 @@ for t, f in (("commit-msg", "commit-msg.txt"), ("pr-title", "pr-title.txt"), ("p
 vocab = {}
 for l in rd("vocab.txt"):
     p = l.split(" | ")
-    if len(p) >= 3: vocab[p[0]] = (p[1], p[2])
+    if len(p) >= 3: vocab[p[0]] = (p[1], p[2]); text.setdefault(p[1], p[1][:-5] if p[1].endswith(":path") else p[2])   # a path segment's path stands for its line
 ner = {}
 for l in rd("ner.txt"):
     p = l.split(" | ", 3)
     if len(p) == 4: ner[p[0]] = (p[1], p[2].split(", "), p[3])
-fl = rd("flags.txt"); at, nflag = {}, 0
-def put(loc, t, why): at.setdefault(loc, [t, []])[1].append(why)
+fl = rd("flags.txt"); flags = []   # one (text, [locations], reason) per agent flag
+who = {"mode: subagent": "A separate agent read the whole change",   # from the reply's mode line; any other line refuses the view
+       "mode: same-agent": "The agent that prepared this change read the whole change itself (no separate agent was available)"}[fl[0] if fl else ""]
 for l in fl[1:]:
     m = re.fullmatch(r"([vn]\d+) \| (ok|flag) \| (.+)", l.strip())
     if m:
         if m.group(2) != "flag": continue
-        nflag += 1; i = m.group(1)
-        if i[0] == "v": loc, t = vocab[i]; put(loc, text.get(loc, t), m.group(3))
-        else:
-            ty, locs, t = ner[i]
-            for loc in locs: put(loc, text.get(loc, ""), "%s %s: %s" % (t, ty, m.group(3)))
+        i = m.group(1); t, _, why = m.group(3).rpartition(" | ")
+        if i[0] == "v": flags.append((t, [vocab[i][0]], why))
+        else: flags.append((t, ner[i][1], why))
         continue
     if " | " in l and l.strip() != "none found" and not l.startswith("coverage:"):
-        q = l.split(" | "); nflag += 1; put(q[0], text.get(q[0], " | ".join(q[1:-1])), q[-1])
+        loc, _, rest = l.partition(" | "); t, _, why = rest.rpartition(" | "); flags.append((t, [loc], why))
+nfc = lambda s: unicodedata.normalize("NFC", s); norm = lambda s: " ".join(nfc(nfc(s).casefold()).split())   # whitespace runs as one space, as flags-check reads them
 def key(loc):
     f, _, ln = loc.rpartition(":"); ln = int(ln) if ln.isdigit() else 0
     return (1 + MSG.index(f), 0, ln) if f in MSG else (0, order.get(f, len(order)), ln)
+bn = {}
+for f in files: bn.setdefault(os.path.basename(f["path"] or ""), set()).add(f["path"])
+def short(loc):   # a file's basename when no other file of the change shares it, else its path
+    f, _, ln = loc.rpartition(":")
+    return loc if f in MSG or os.path.basename(f) in MSG or len(bn.get(os.path.basename(f), ())) != 1 else "%s:%s" % (os.path.basename(f), ln)
+def snip(t, loc, w=60):   # ~60 characters of the line centred on the flagged text, never more
+    ln = " ".join(nfc(text.get(loc, "")).split()); t = " ".join(nfc(t).split()); i = ln.find(t)   # NFC, whitespace runs as one space (as flags-check reads it)
+    if i < 0: return None
+    if len(t) >= w: return t
+    s0 = max(0, min(i - (w - len(t)) // 2, len(ln) - w)); e0 = min(len(ln), s0 + w)
+    return ("…" if s0 else "") + ln[s0:e0] + ("…" if e0 < len(ln) else "")
+groups = {}   # the flagged text, case- and NFC-insensitive → its spellings and its flags
+for t, locs, why in flags:
+    g = groups.setdefault(norm(t), {"sp": {}, "fl": []}); g["sp"].setdefault(nfc(t), None); g["fl"].append((locs, why))
+N = lambda n, w, pl=None: "%d %s" % (n, w if n == 1 else (pl or w + "s"))   # 1 place / 3 places
+out = []
+for g in sorted(groups.values(), key=lambda g: min(key(x) for ls, _ in g["fl"] for x in ls)):
+    locs = sorted({x for ls, _ in g["fl"] for x in ls}, key=key); whys = list(dict.fromkeys(w for _, w in g["fl"]))
+    t = " / ".join("«%s»" % x for x in g["sp"]); hits = N(len(locs), "place")
+    if len(whys) == 1: out += ["  %s — %s — %s" % (t, whys[0], hits), "    " + ", ".join(short(x) for x in locs)]
+    else:
+        out.append("  %s — %s, %d reasons:" % (t, hits, len(whys)))
+        for w in whys: out.append("    %s — %s" % (w, ", ".join(short(x) for x in sorted({x for ls, y in g["fl"] if y == w for x in ls}, key=key))))
+    ctx = next(((x, c) for x in locs for c in [next((snip(sp, x) for sp in g["sp"] if snip(sp, x)), None)] if c), None)
+    if ctx: out.append("    context (%s): %s" % (short(ctx[0]), ctx[1]))
+nflag, nloc = len(flags), len({x for _, ls, _ in flags for x in ls})
 pats = [l for l in rd("patterns.txt") if l.strip()]
 notes = rd("scan-notes.txt"); local = next((x.split("=", 1)[1] for x in notes if x.startswith("local-patterns=")), "?")
-print("Agent flags — %s (flag pass: %s):" % ("%d flag(s) at %d location(s)" % (nflag, len(at)) if nflag else "none", fl[0][6:]))
-for loc in sorted(at, key=key): print("  %s | %s | %s" % (loc, at[loc][0], "; ".join(at[loc][1])))
-print("① Pattern hits — %d (deterministic; each one is a decision):" % len(pats))
-print("\n".join("  " + x for x in pats) if pats else "  none")
-print("STOPs: none — a STOP ends the run before this view is built")
-for x in notes:
-    if x.startswith("pii-patterns sync: ") and not x.startswith("pii-patterns sync: ok"): print("  warning: " + x)
-if local == "absent": print("  warning: this machine has no .openbrain/local/pii-patterns — the pattern list ran with the built-in patterns only")
-print("Files vs %s — %d file(s), +%d −%d:" % (base, len(files), sum(f["a"] for f in files), sum(f["d"] for f in files)))
-for f in files: print("  %s  +%d −%d  %s" % (f["path"] or f["git"], f["a"], f["d"], f["kind"]))
-print("counts: %d focus item(s) and %d NER item(s), all answered · %d agent flag(s) at %d location(s) · %d pattern hit(s) · local-patterns=%s"
-      % (len(vocab), len(ner), nflag, len(at), len(pats), local))
-print("lists (not pasted, one path away): focus %s/vocab.txt · NER %s/ner.txt · brief %s/brief.txt" % (sd, sd, sd))
+V = ["Agent review — %s in %s, %s:" % (N(nflag, "flag"), N(nloc, "place"), N(len(groups), "distinct text")) if nflag else
+     "Agent review — nothing flagged. %s: all %s, all %s from the local personal-info (PII) scanner, the commit message, the PR text and the branch name." % (who, N(len(vocab), "checklist item"), N(len(ner), "detection"))] + out
+V.append("Exact-match rules — %s. (Rules for keys, tokens, IDs, home paths and your private list; every match needs your decision.)" % (N(len(pats), "match", "matches") if pats else "nothing matched"))
+V += ["  " + x for x in pats]
+V.append("Blocking problems — none. (Any would have stopped the run before this summary.)")
+for x in notes:   # the private-list sync's state, in plain words (an unknown state is shown as it came)
+    if not x.startswith("pii-patterns sync: ") or x.startswith("pii-patterns sync: ok"): continue
+    st = x[len("pii-patterns sync: "):]
+    V.append("  warning: " + ("the template clone's private pattern list holds entries the vault's copy lacks, so it was not refreshed from the vault — the clone's copy ran as is" if st.startswith("WARN")
+             else "this vault has no tool to sync the private pattern list (a template vault has none) — the clone's copy ran as is" if st.startswith("MISSING") else "the private pattern list's sync reported: " + st))
+if local == "absent": V.append("  warning: this machine has no private pattern list — only the built-in rules ran")
+V.append("Files changed (vs %s) — %s, +%d −%d:" % (base, N(len(files), "file"), sum(f["a"] for f in files), sum(f["d"] for f in files)))
+V += ["  %s  +%d −%d  %s" % (f["path"] or f["git"], f["a"], f["d"], f["kind"]) for f in files]
+V.append("Totals: %s and %s, all reviewed · %s%s · %s · your private list: %s"
+      % (N(len(vocab), "checklist item"), N(len(ner), "scanner detection"), N(nflag, "agent flag"), " in " + N(nloc, "place") if nflag else "", N(len(pats), "rule match", "rule matches"),
+         local if local in ("absent", "?") else N(int(local), "entry", "entries") if local.isdigit() else local))
+V.append("To check the agent's work, ask to see the full change (%s), its checklist (%s) or the PII scanner's detections (%s)." % (N(len(rd("full.diff")), "line"), N(len(vocab), "item"), N(len(ner), "item")))
+# no flag may disappear: read the finished view back — each flag is shown when one «text» block of the flags section
+# carries its text, its reason and every one of its locations — and compare with a raw count of the reply's flag lines
+blocks, cur = [], None
+for x in V[1:]:
+    if x.startswith("Exact-match rules — "): break
+    if x.startswith("  «"): cur = [x]; blocks.append(cur)
+    elif cur is not None: cur.append(x)
+def shown_at(b, why):   # the locations a block shows under exactly this reason: a one-reason header ending « — <reason> — N places»
+    body = [x for x in b[1:] if not x.startswith("    context (")]   # and its location line, or a «    <reason> — <locations>» line
+    if not re.search(r" — \d+ places?, \d+ reasons:$", b[0]): return set(body[0][4:].split(", ")) if body and re.fullmatch(r".* — " + re.escape(why) + r" — \d+ places?", b[0]) else set()
+    return {y for x in body if x.startswith("    %s — " % why) and " — " not in x[len("    %s — " % why):] for y in x[len("    %s — " % why):].split(", ")}   # a longer reason that starts with this one is not this one
+seen = lambda t, locs, why: any("«%s»" % nfc(t) in b[0] and {short(x) for x in locs} <= shown_at(b, why) for b in blocks)
+shown = sum(1 for f in flags if seen(*f))
+raw = sum(1 for l in fl[1:] if l.strip() and l.strip() != "none found" and not l.startswith("coverage:") and not re.fullmatch(r"[vn]\d+ \| ok \| .+", l.strip()))
+if not (shown == raw == len(flags)):
+    sys.stderr.write("the view shows %d flag(s); the reply holds %d (parsed %d) — refusing a view that drops one\n" % (shown, raw, len(flags))); sys.exit(1)
+print("\n".join(V))
 PY
-cat "$SCAN_DIR/digest.txt"; echo "full diff (kept through step 6): $SCAN_DIR/full.diff  ($(wc -l < "$SCAN_DIR/full.diff" | tr -d ' ') lines)"
+cat "$SCAN_DIR/digest.txt"
 ```
 
-**Paste this view verbatim into your reply text, in full, as one fenced block** — every line the block printed, in its order: the agent's flags (one line per `file:line`, every reason the agent gave there), the ① pattern hits, the STOPs line, the files, the counts line and the paths. A summary, a paraphrase, a reordering or an excerpt is not the view, and a view that lives only in tool output has not been shown: on a remote or mobile surface the user cannot see tool output. A long view is pasted whole all the same. The focus list, the NER list and the brief are not pasted; the agent answered every item of both lists, and each is one path away. Do not open anything in an app for the user (the starters run on more than one OS). Then prompt the user via `AskUserQuestion` — **one decision for the whole run**:
+**Paste this view verbatim into your reply text, in full, as one fenced block** — every line the block printed, in its order: **Agent review** (the agent's flags grouped by the flagged text, case- and NFC-insensitive, each group with every reason and every place; the view refuses to build if a flag would go unshown), **Exact-match rules** (the pattern hits), **Blocking problems** with any warnings, **Files changed**, **Totals** and the footer. A summary, a paraphrase, a reordering or an excerpt is not the view, and a view that lives only in tool output has not been shown. A long view is pasted whole all the same. The view names no scratch file: the full change, the checklist (focus list), the detections (NER list) and the brief are `$SCAN_DIR/full.diff`, `vocab.txt`, `ner.txt` and `brief.txt` (5a printed them), opened only when the user asks. Do not open anything in an app for the user. Then prompt the user via `AskUserQuestion` — **one decision for the whole run**:
 
-> The flag pass found <K flags at L locations | none> over <V> focus items and <N> NER items; the pattern list found <P> hits. Does anything look wrong? (Full diff: `<path>`; focus list: `<path>`; NER list: `<path>`.)
+> The agent flagged <nothing | K things in L places> across <V> checklist items and <N> scanner detections, and <no exact-match rule matched | P exact-match rules matched>. Does anything look wrong?
 >
 > Options:
 > - **Looks good — commit**
-> - **Decide each** — one `AskUserQuestion` per flagged location and per pattern hit: **Fix** (rewrite it generically per step 3, `git add -A`, re-run from step 4 — a fix can introduce new text, and only the index is scanned or committed), **Drop the file** (`git reset -q -- <file> && git checkout -q -- <file>` for a modified file, `git rm -q --cached <file> && rm <file>` for a new one, then re-run from step 4), or **Accept with reason** (recorded in the commit body as `PII-review: accepted <flag | pattern> in <file> — <reason>`, the kind and the file, never the matched text; the message changed, so re-run from step 4)
+> - **Decide each** — one `AskUserQuestion` per flag group and per pattern hit. A flag group is one reason line of a text's block in the view (the text is case- and NFC-insensitive, the reason exact): a text flagged for two reasons is two decisions, and each answer applies at every location the view lists for it — **Drop the file** drops every file among them. **Fix** (rewrite it generically per step 3, `git add -A`, re-run from step 4 — a fix can introduce new text, and only the index is scanned or committed), **Drop the file** (`git reset -q -- <file> && git checkout -q -- <file>` for a modified file, `git rm -q --cached <file> && rm <file>` for a new one, then re-run from step 4), or **Accept with reason** (recorded in the commit body as `PII-review: accepted <flag | pattern> in <file> — <reason>`, one line per file the group or hit touches and one per message it sits in (`in commit-msg`, `in pr-title`, `in pr-body`, `in branch-name`), the kind and the file, never the matched text; the message changed, so re-run from step 4)
 > - **Revert all** (`git reset -q --hard && git checkout main && git branch -D <change-slug>` in the template repo, then `rm -rf "$SCAN_DIR"`)
-> - **Show me path X** — read a specific staged file, a hunk of the full diff, the focus list or the NER list
+> - **Show me X** — the full change, its checklist, the scanner detections, a staged file or a hunk
 
-Only proceed to step 6 on an explicit **Looks good — commit** for this view. Silence, an answer to an earlier view or an OK given before the view was pasted is not one. Then delete the sensitive artefacts (this includes the step-1 path inventories — `vault.all` lists every note title in the vault — and both step-4 lists). The list is step 4's `shred_findings` list, minus the two stamps; `find`, not an `rm` glob, because zsh aborts an `rm` whose glob matches nothing. It keeps `commit-msg.txt`, `pr-title.txt`, `pr-body.txt`, `coverage.txt`, the step-5 files and the stamps `scan.ok` and `flags.ok`, which step 6 re-checks before it commits:
+Only proceed to step 6 on an explicit **Looks good — commit** for this view. Silence, an answer to an earlier view or an OK given before the view was pasted is not one. Then delete the sensitive artefacts (this includes the step-1 path inventories — `vault.all` lists every note title in the vault — and both step-4 lists). The list is step 4's `shred_findings` list, minus the two stamps. It keeps `commit-msg.txt`, `pr-title.txt`, `pr-body.txt`, `coverage.txt`, the step-5 files and the stamps `scan.ok` and `flags.ok`, which step 6 re-checks before it commits:
 
 ```bash
 # --- push-skill: post-ok ---
@@ -901,7 +801,7 @@ git reset -q --hard && git checkout -q main && git branch -q -D "$DRY_BRANCH" &&
 
 ### 6. Commit, push, and open PR
 
-Commit with the scanned message (it carries the accept-with-reason lines). The commit block first runs the stamps check — its own marked block, `push-skill: stamps-check`, extracted and run, never copied. The check recomputes the stamp the way steps 4 and 5b wrote it and STOPs when either differs (a change or a message edited after the OK was never scanned, flagged or read), and it asserts `HEAD` is `BASE` (a commit already on the change branch carries a message no step scanned) and that `BASE` is published — an ancestor of `DEST_REF`, or for a stacked change of its own pushed ref — since a commit only on the local base rides along on the push unscanned.
+Commit with the scanned message (it carries the accept-with-reason lines). The commit block first runs the stamps check — its own marked block, `push-skill: stamps-check`, extracted and run, never copied. The check recomputes the stamp the way steps 4 and 5b wrote it and STOPs when either differs, and it asserts `HEAD` is `BASE` and that `BASE` is published — an ancestor of `DEST_REF`, or for a stacked change of its own pushed ref. On any of these STOPs nothing is committed; do what the message says.
 
 ```bash
 # --- push-skill: stamps-check ---
@@ -942,7 +842,7 @@ if [ -n "${PR_BASE:-}" ]; then gh pr create --base "$PR_BASE" --title "$(cat "$S
 else                           gh pr create                   --title "$(cat "$SCAN_DIR/pr-title.txt")" --body-file "$SCAN_DIR/pr-body.txt"; fi
 ```
 
-(`PR_BASE` is the parent PR's branch for a stacked change; unset otherwise. Two literal invocations rather than `${PR_BASE:+--base "$PR_BASE"}`, which zsh expands to one word.) The PR body keeps the genericization checklist:
+(`PR_BASE` is the parent PR's branch for a stacked change; unset otherwise. Keep the two literal invocations.) The PR body keeps the genericization checklist:
 
 ```markdown
 ## Summary
@@ -989,4 +889,4 @@ A structured report (the items in §7) plus the PR URL(s).
 - The template's `pre-push` hook (`.openbrain/pre-push.sh`) is a protected-remote URL guard only — it scans no content and no commit messages. Step 4 is the content check; do not treat the hook as a backstop.
 - If the user asks `/push-openbrain-template all` and the diff is huge, batch the work change-by-change with a brief progress line, rather than one giant report.
 - This skill is itself a candidate for porting. The template version helps users keep their personal forks in sync with their own upstreams.
-- Callers (any skill layered on these blocks, for enumerate/scan) extract the marked block range (`# --- push-skill: <name> ---` through the closing fence) and never read this file whole — a whole-file read is a ~70% per-run cost increase. Extraction runs through the shared helper, `.openbrain/lib/extract-block.sh` (ships alongside this skill) — see `/pull-openbrain-template`'s Notes for the command form (both `<file>` and the helper's own path always absolute — a caller's cwd may have moved into a clone) and cost figure. `deny()` and `in_roots()` are no longer extracted from this file's live text by anyone — every sync skill, including `/pull-openbrain-template`'s plan block, sources them directly from `.openbrain/lib/template-scope.sh`.
+- Callers (any skill layered on these blocks, for enumerate/scan) extract the marked block range (`# --- push-skill: <name> ---` through the closing fence) and never read this file whole. Extraction runs through the shared helper, `.openbrain/lib/extract-block.sh` (ships alongside this skill) — see `/pull-openbrain-template`'s Notes for the command form (both `<file>` and the helper's own path always absolute — a caller's cwd may have moved into a clone). `deny()` and `in_roots()` are sourced from `.openbrain/lib/template-scope.sh`, and `focus_brief()` (5a's two builders) and `flags_check()` (5b's reply check) from `.openbrain/lib/flag-pass.sh`, by this skill — never extracted from this file.

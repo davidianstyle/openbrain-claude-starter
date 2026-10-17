@@ -46,12 +46,9 @@ CANARY = "Contact Jane Q. Doe at jane.doe@example.com, 1400 Maple Avenue."
 CANARY_REQUIRED = ("PERSON", "EMAIL_ADDRESS")
 
 # Types that fire constantly on ordinary prose and code and carry no
-# genericization signal. ORGANIZATION is here because it is by far the noisiest
-# on source: 68 of 82 findings on one shell script were things like `MAIN`,
-# `&& pwd`, `TARGET`.
-# URL is deliberately NOT here: a signed, tokenized or internal link is one of
-# the leak classes a publishing gate exists to catch, so it is shown and the
-# mandatory per-finding disposition absorbs the noise.
+# genericization signal (ORGANIZATION is the noisiest on source; measurements:
+# PII-SCAN-CONTRACT.md, "Precision"). URL is deliberately NOT here: a signed,
+# tokenized or internal link is a leak class a publishing gate exists to catch.
 GATE_NOISE = ("DATE_TIME", "NRP", "ORGANIZATION")
 
 # Two presets, no free-form tuning.

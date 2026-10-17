@@ -14,8 +14,8 @@
 #   pii-scan --mode review FILE              # human doc review: show everything
 #   pii-scan --selftest                      # prove the scanner really works
 #
-# There is deliberately no --entities and no --min-confidence: every one of this
-# tool's silent-blindness bugs came from a knob that narrowed a scan to nothing.
+# There is deliberately no --entities and no --min-confidence (contract: "There
+# are no knobs that narrow a scan").
 #
 # EXIT CODES ARE THE CONTRACT:
 #   0  scanned, no findings          1  scanned, FINDINGS PRESENT

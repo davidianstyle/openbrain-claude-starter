@@ -29,9 +29,8 @@
 #     SAME OR HIGHER (more '#'s stays in the body) — or to EOF if none.
 #     <heading> is a full heading line only when it matches `^#{1,6} `;
 #     anything else — including '#' with no following space, e.g. "#42
-#     Escalation" — is level-2 TEXT, anchored as "## <heading>" verbatim
-#     (the original default). The start anchor, its duplicate count, and the
-#     terminator search are all fence-gated: a heading-shaped line inside a
+#     Escalation" — is level-2 TEXT, anchored as "## <heading>" verbatim. The start
+#     anchor, its duplicate count, and the terminator search are all fence-gated: a heading-shaped line inside a
 #     fence (a quoted example) is body, never counted, never a terminator.
 #     Fences (section mode only): an opener is 3+ of the same
 #     character (backtick or tilde); its closer is a line of only that
@@ -53,12 +52,9 @@
 # a next-best/nearby range, nor to the next structural boundary when an end
 # marker is declared but not found.
 #
-# Motivation: one stable, ABSOLUTE command string per call site (callers
-# invoke with both <file> and this script's own path given as
-# "$VAULT/...") — reused for every block/section in every skill — means one
-# permission approval instead of a fresh one per ad hoc awk/sed invocation,
-# and never silently reads the wrong copy when the caller's cwd has moved (a
-# skill's own preflight often cds into a template clone).
+# Callers pass both <file> and this script's own path as absolute
+# "$VAULT/..." paths (a skill's preflight often cds into the template clone).
+# Why one shared helper: bootstrap/PII-SCAN-CONTRACT.md, "Design notes".
 #
 # Outcomes — three, never two, same shape for both modes:
 #   0    body printed to stdout (>=1 non-blank line present). Nothing on stderr.
@@ -78,18 +74,12 @@
 #        in here). Treat as CANNOT-CHECK: restore it from git, or re-pull the
 #        template — it ships alongside /push-openbrain-template.
 #
-# Hardening: the file is read exactly ONCE into a private snapshot
-# (TOCTOU-safe; every pass reads the snapshot, never the live path again);
-# anchor/end-marker text goes through awk via ENVIRON, never `-v` (`-v
-# m='back\slash'` silently C-escapes to `backslash`); every awk/sed call
-# gets `</dev/null` and an absolute path (a bare `x=y.md` can be misparsed by
-# awk as `var=value` and hang on stdin); every locate-awk field is validated
-# as a plain integer before arithmetic touches it (one clean CANNOT-CHECK,
-# never a bash arithmetic error on a truncated line); the body range is
-# checked non-positive BEFORE `sed -n` (BSD prints line 2 for a `2,1p`
-# range, not nothing); the print pass counts what it actually wrote (awk,
-# not `wc -l` — which undercounts a final line with no trailing newline) and
-# checks it non-blank, against the printed output itself, before trusting it.
+# Hardening (each guard's failure case: the contract's "Design notes"): the
+# file is read ONCE into a private snapshot; anchor text reaches awk via
+# ENVIRON, never `-v`; every awk/sed call gets `</dev/null` and an absolute
+# path; every locate-awk field is validated as an integer before arithmetic;
+# the body range is checked non-positive BEFORE `sed -n`; the print pass
+# counts (awk, not `wc -l`) and blank-checks what it actually wrote.
 #
 # No dependencies beyond POSIX awk/sed; runs under bash 3.2 (macOS default).
 
@@ -145,9 +135,8 @@ fi
 
 [ -f "$FILE" ] && [ -r "$FILE" ] || cannot_check "file unreadable: $FILE"
 
-# Snapshot once (TOCTOU): every later pass reads this private copy, never the
-# live path again. Absolute mktemp path, so it can never look like a bare
-# "x=y.md" name to awk either.
+# Snapshot once: every later pass reads this private copy, never the live
+# path again. Absolute mktemp path: never a bare "x=y.md" name to awk.
 SNAPSHOT="$(umask 077 && mktemp "${TMPDIR:-/tmp}/extract-block-snap.XXXXXX")" || cannot_check "could not create a snapshot temp file"
 TMP_OUT="$(umask 077 && mktemp "${TMPDIR:-/tmp}/extract-block-out.XXXXXX")" || { rm -f "$SNAPSHOT"; cannot_check "could not create an output temp file"; }
 trap 'rm -f "$SNAPSHOT" "$TMP_OUT"' EXIT
@@ -242,12 +231,9 @@ else
   if [ "$TERM" -gt 0 ]; then BODY_END=$((TERM - 1)); else BODY_END="$TOTAL"; fi
 fi
 
-# Print pass, folded with validation: the range is checked
-# non-positive BEFORE ever calling sed (BSD `sed -n '2,1p'` prints line 2
-# rather than nothing, so a zero/negative range must never reach it); the
-# printed output is then counted with awk (never `wc -l`, which undercounts
-# a final line with no trailing newline) and checked non-blank, both against
-# what was actually written, before it is trusted and emitted.
+# Print pass, folded with validation: range checked non-positive BEFORE sed
+# (BSD `sed -n '2,1p'` prints line 2); output counted with awk (`wc -l`
+# undercounts a last line with no newline) and blank-checked before emitting.
 EXPECTED=$((BODY_END - BODY_START + 1))
 EMPTY_MSG="body empty"; [ "$MODE" = marker ] && EMPTY_MSG="body empty in marker block: $ANCHOR_LINE" || EMPTY_MSG="body empty in section: $ANCHOR_LINE"
 [ "$EXPECTED" -gt 0 ] || cannot_check "$EMPTY_MSG"

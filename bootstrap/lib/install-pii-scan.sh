@@ -2,14 +2,9 @@
 # install-pii-scan.sh — provision the local PII scanner (Microsoft Presidio +
 # spaCy NER) that the outbound sync procedure depends on. Idempotent.
 #
-# WHY THIS IS A REQUIRED SETUP COMPONENT, not an optional extra:
-# the outbound procedure is specified to scan
-# the content it is about to publish for personal data. A pattern list can only
-# match identifiers someone thought to enumerate; the leaks that matter are the
-# ones nobody enumerated — a third party's name, a street address, a stranger's
-# email quoted in a comment. Those need NER. A machine without this component
-# must REFUSE to push rather than fall back to patterns-only. Hence: required.
-# (Which skills call it, and how: see bootstrap/PII-SCAN-CONTRACT.md.)
+# REQUIRED, not optional: a machine without it must REFUSE to push rather than
+# fall back to patterns-only (why, and which skills call it and how:
+# bootstrap/PII-SCAN-CONTRACT.md).
 #
 # What it installs:
 #   - a dedicated Python venv (default ~/.local/share/pii-scan-venv) holding
@@ -17,14 +12,11 @@
 #     en_core_web_lg model (~430MB; ~570MB for the whole venv). Dedicated so the
 #     heavy NLP deps never pollute system Python and survive a brew upgrade.
 #   - a symlink <bindir>/pii-scan -> <repo>/bootstrap/lib/pii-scan, putting it
-#     on PATH. The scanner lives under bootstrap/lib/ rather than a top-level
-#     bin/ because bin/ is hard-denied by the outbound sync rules (it is where
-#     machine-local personal tooling lives), so a scanner shipped there could
-#     never receive an update through the very gate it powers.
+#     on PATH. Under bootstrap/lib/, never bin/: bin/ is hard-denied by the
+#     sync, so a scanner there could never be updated through it.
 #
-# spaCy is pinned to the range the model declares (`spacy_version >=3.8,<3.9`).
-# Unpinned, a fresh install would one day pair spaCy 3.9 with a 3.8 model and
-# break — fail-closed, but only on new machines, the hardest kind to diagnose.
+# spaCy is pinned to the range the model declares (`spacy_version >=3.8,<3.9`),
+# so a fresh install never pairs a newer spaCy with this model.
 #
 # Usage:
 #   install-pii-scan.sh            # install if missing, verify, no-op if healthy
@@ -32,8 +24,7 @@
 #   install-pii-scan.sh --force    # rebuild the venv from scratch
 #
 # Exit: 0 = healthy, 2 = could not get to healthy. NEVER any other code — an
-# unexpected failure is trapped and reported as 2, because a caller gating on
-# `-eq 2` would otherwise read a bare `set -e` finish 1 as "not unhealthy".
+# unexpected failure is trapped and reported as 2 (a caller gates on `-eq 2`).
 #
 # It ALWAYS verifies by running `pii-scan --selftest` THROUGH PATH — the same
 # resolution a caller will use. Testing the repo's copy instead would pass while
@@ -43,14 +34,11 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Installed BEFORE sourcing common.sh: a partial checkout makes that source fail,
-# and under `set -e` it would finish 1 — which a caller gating on `-eq 2` reads as
-# "not unhealthy". Uses echo, not err(), because err() is defined by common.sh.
-# Exit status is tracked with an explicit flag rather than inferred from $? in
-# the trap: a failing `source` under `set -e` did not reliably surface as a
-# nonzero $? there, so the script exited 0 on an incomplete checkout — reporting
-# HEALTHY for a machine with no scanner. Every deliberate exit goes through
-# finish(); anything else is an unexpected failure and becomes 2.
+# Installed BEFORE sourcing common.sh, so a partial checkout (that source
+# failing) still exits 2. echo, not err(): err() is defined by common.sh.
+# Every deliberate exit goes through finish(), which sets the flag; anything
+# else is an unexpected failure and becomes 2 (never inferred from $? in the
+# trap — why: bootstrap/PII-SCAN-CONTRACT.md, "Design notes").
 _finished=""
 finish() { _finished=1; exit "$1"; }
 _normalize_exit() {
@@ -83,12 +71,10 @@ case "${1:-}" in
 esac
 [[ $# -le 1 ]] || { err "too many arguments (got: $*)"; finish 2; }
 
-# Resolve pii-scan the way a caller would: through PATH, with BIN_DIR added
-# since a just-created symlink will not be on the inherited PATH yet.
+# Resolve pii-scan the way a caller would: through the INHERITED PATH, exactly
+# as a caller has it — nothing prepended, so another pii-scan earlier on PATH
+# is the one checked, as it is the one a caller gets.
 resolved_scanner() {
-  # The INHERITED PATH, exactly as a caller has it. Prepending BIN_DIR here was
-  # the bug: it made `--check` validate our link while a caller with any other
-  # pii-scan earlier on PATH silently got that one instead.
   command -v pii-scan 2>/dev/null || true
 }
 same_file() { [[ -e "$1" && -e "$2" ]] && [[ "$1" -ef "$2" ]]; }
@@ -107,10 +93,9 @@ wrapper_dir() {
   (cd "$(dirname "$self")" && pwd)
 }
 
-# Healthy means: the scanner a CALLER will run is ours, and it passes selftest
-# against the pinned model. Checking $WRAPPER instead would miss a hijack.
-# Healthy means: the pii-scan a CALLER resolves is ours, and its canary passes.
-# `-ef` compares the resolved inode, so relative links, multi-level links and
+# Healthy means: the pii-scan a CALLER resolves is ours (not just $WRAPPER, which
+# would miss a hijack), and its canary passes against the pinned model. `-ef`
+# compares the resolved inode, so relative links, multi-level links and
 # symlinked parent directories all compare correctly.
 healthy() {
   local found
@@ -146,8 +131,6 @@ fi
 [[ -x "$WRAPPER" ]] || { err "missing $WRAPPER — is this a complete checkout?"; finish 2; }
 
 # ---------- PATH link FIRST, so `healthy` can ever be true ----------
-# (This used to sit after the early "already installed" return, which meant
-# install mode could never create a missing link or surface a hijacked one.)
 mkdir -p "$BIN_DIR" || { err "could not create $BIN_DIR"; finish 2; }
 if [[ -L "$LINK" ]]; then
   existing="$(readlink "$LINK")"

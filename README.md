@@ -26,8 +26,8 @@ Built for people who want Claude to act on their calendar, email, tasks, and not
   sidesteps Python-version issues; setup falls back to `python3 -m venv` without it
 
 Setup also installs a **local PII scanner** (Microsoft Presidio + spaCy; ~430MB model,
-~570MB venv, a few minutes on first run). It is required: the push and pull skills scan
-everything they publish or take in for personal data, and refuse to run if the scanner
+~570MB venv, a few minutes on first run). It is required: the push skill scans
+everything it publishes for personal data, and refuses to run if the scanner
 is missing rather than fall back to a pattern list. The text it reads never leaves your
 machine. See `bootstrap/PII-SCAN-CONTRACT.md`.
 
@@ -135,7 +135,7 @@ Each script is idempotent — safe to re-run.
 | `/learn-writing-style` | Derive a writing-style profile from your sent mail and Slack, then update CLAUDE.md §6 |
 | `/weekly-review` | Monday synthesis |
 | `/push-openbrain-template` | Genericize vault improvements and open a PR against the template repo |
-| `/pull-openbrain-template` | Pull the template's `main` into the vault: per-file merge from the last applied marker (`.openbrain/local/taken.tsv`), incoming content scanned before it lands |
+| `/pull-openbrain-template` | Pull the template's `main` into the vault: per-file merge from the last applied marker (`.openbrain/local/taken.tsv`) |
 | `/asana` | Quick view of upcoming Asana tasks with interactive check-off |
 
 Skills are markdown procedures — Claude reads the SKILL.md and performs the steps. No code execution.
