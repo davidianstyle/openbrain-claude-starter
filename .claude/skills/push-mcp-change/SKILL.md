@@ -55,14 +55,22 @@ Bugfixes, chores, and spikes all go under `feat/` if they are meant to run. Neve
    Pick `<slug>` for the change, not its category: `feat/gmail-blank-text-part`, not `feat/bugfix`.
 
 3. **Make the change. Test it against real data, not just types.** `tsc` passing is not a test.
-   Run the repo's suite, and exercise the changed path against live input where one exists. For
-   detection/parsing changes the failure mode is the silent false-negative, so a throwaway harness
-   against real data is mandatory.
+   Run the repo's suite, then run the changed path for real. **Reproduce the bug or behavior on the
+   current build first** (before touching code), so you have seen it fail; then show old failing →
+   new working, on a **scratch resource** (a throwaway repo, test mailbox, scratch doc, dummy record),
+   never a real user resource. If you cannot reproduce it on the old build, you do not yet understand the
+   change. For detection/parsing changes the failure mode is the silent false-negative, so a
+   throwaway harness against real data is mandatory.
 
 4. **Add regression tests, then mutation-check them.** Revert the fix, confirm each new test fails,
    restore. A test that passes both ways pins nothing.
 
-5. **Push to the fork.**
+5. **Review, then push to the fork.** The fork is a public repo, so the push publishes the diff and
+   its commit messages. Before it, run `/code-review` at **high** effort on the branch diff against
+   `origin/main`, and scrub the diff **and the commit messages** for anything personal. Verify each
+   finding on the merits, fix what holds, and re-run. Bounded: **max 2 fix rounds**, then stop and
+   escalate to the user with the open findings rather than a third round. Only then, with the user's go
+   for the push (see Guardrails):
    ```
    git push -u fork feat/<slug>
    ```
@@ -71,13 +79,30 @@ Bugfixes, chores, and spikes all go under `feat/` if they are meant to run. Neve
    `gh auth refresh -h github.com -s workflow` (one-time, then `gh api repos/<user>/<repo>/merge-upstream -f branch=main`),
    or sync the fork from GitHub's web UI. Do **not** work around it by rewriting history.
 
-6. **Apply — do not skip this.** Your author build is *not* the applied build:
+6. **Apply — do not skip this, and pin it.** Your author build is *not* the applied build. First get
+   the offer:
    ```
-   bash .openbrain/lib/check-updates.sh --apply <name>
+   bash .openbrain/lib/check-updates.sh --offer <name>
    ```
-   (`<name>` is the launcher name, e.g. `google-mcp`.) This runs the fork engine under the build
-   lock and keeps the last-good build if tests fail. It must report `applied`; `failed` means
-   the build did not land.
+   (`<name>` is the launcher name, e.g. `google-mcp`.) It fetches, then prints the pinned
+   `--apply <name> --pin <pin>` (the pin lists the exact commits the go builds) and one line per
+   entry: `new` = the go lands it, `have` = `local-build` already has it, `drop` = `local-build`
+   has it and the go removes it (gone from the fork).
+   - **If any `new` line is not your own `fork/feat/<slug>`** (another feat, or `origin/main`), **or
+     there is any `drop` line you did not intend**, the apply would change work nobody showed
+     the user in this flow. **STOP:** list those lines for the user and apply only on their go. (A bare
+     `--apply <name>` would land whatever is live, silently — never use one here.)
+   - Otherwise run the printed command exactly, `--pin` included:
+     `bash .openbrain/lib/check-updates.sh --apply <name> --pin <pin>`. Anything pushed to the fork
+     after the offer is not in it; the next offer shows it.
+   - `--offer` exiting 20 (`cannot — …`) means no pinned offer is possible (fetch failed, refs
+     unreadable): fix what it names, then re-run it. `--apply` `failed` naming an approved commit
+     "not in … after the fetch" means it was force-pushed away: re-run `--offer`.
+   - `--apply` `stale` (exit 5) means the offer is out of date and nothing was built (the rule and its
+     revert limit: `/brain-update-check`, **Stale offers**). Re-run `--offer` and re-check its
+     `new`/`drop` lines — they may differ now.
+   The apply runs the fork engine under the build lock and keeps the last-good build if tests
+   fail. It must report `applied`; `failed` means the build did not land.
    Author build = your branch alone, on whatever base you cut from, with no provenance marker.
    `local-build` = current `origin/main` + **every** live `feat/*` merged, with `dist/.built-from`
    written. They coincide only when there is exactly one in-flight branch based on current upstream —
@@ -89,11 +114,12 @@ Bugfixes, chores, and spikes all go under `feat/` if they are meant to run. Neve
    State it plainly, every time.
 
 8. **Verify what's live** if the change is behaviourally interesting — spawn the real launcher and
-   speak MCP over stdio rather than importing the changed function directly. A server that won't
-   boot passes every unit test.
+   speak MCP over stdio rather than importing the changed function directly, against a scratch
+   resource as in step 3. A server that won't boot passes every unit test.
 
-9. **Release (`--pr`) only when asked.** Before opening or updating a PR, run a pre-PR gauntlet:
-   lint/typecheck, real-data test, `/code-review` at high effort, and
+9. **Release (`--pr`) only when asked.** Before opening or updating a PR, run a pre-PR gauntlet
+   (the step 5 review covered the push; re-run it on the final diff): lint/typecheck, real-data
+   test, `/code-review` at high effort, and
    a **fresh subagent given the raw diff and the job of refuting it** — never the author's reasoning
    or expected verdict. Verify each finding on the merits; the refuter is sometimes wrong.
    Then scrub the outgoing diff **and the commit message** for anything personal, and:

@@ -562,6 +562,101 @@ mcp_fork_unsupported(){
 # checker's unproven-build, fixed by --apply.
 mcp_stamped(){ [ -f "$1/dist/.built-from" ] && head -1 "$1/dist/.built-from" | grep -Eq '^[0-9a-f]{40}$'; }
 
+# --- apply pins: a go lands exactly what was approved -----------------------------
+# The offer's pin IS the build composition, so the apply builds exactly it — nothing that
+# arrived after the offer (that is the next offer), nothing re-derived.
+#   fork:     main=<sha>[,feat/<name>=<sha>]...  (origin/main + each fork/feat/* tip, 40-hex
+#             shas, feats in byte order). One shell-safe token: names are [A-Za-z0-9._/-] only.
+#   checkout: the origin/<branch> sha (40 hex).   npm: the version.
+# Every pin ends in `,built=<id>`: the build the offer was made against — dist/.built-from
+# (mcp_built_id) for fork/checkout, the recorded .applied version for npm, `none` when there
+# is none. A go whose built= is not the current build is refused (stale offer), so applying an
+# older offer can never move the build backward over an apply that landed after it.
+# mcp_fork_pin_listing <dir> <base-ref> <fork-remote> : "<ref> <sha>" lines — the base ref
+#   first, then every <fork-remote>/feat/* tip in byte order. rc 1 (nothing on stdout) when a
+#   ref cannot be read: a pin is never built from a partial listing.
+# mcp_fork_pin <fork-remote> : stdin listing -> the fork composition (no built= yet; the caller
+#   appends it with mcp_pin_with_built). rc 1 when a feat name cannot be carried in the token
+#   (the caller reports CANNOT-CHECK; never a shortened pin).
+# mcp_pin_valid <fork|checkout|npm> <pin> : rc 0 when <pin> has that kind's form, built= included
+#   — the ONE validator (check-updates.sh --apply and the engine both call it). mcp_pin_form names it.
+# mcp_pin_unbuilt <kind> <pin> : rc 0 when <pin> is a composition with no built= entry — it names
+#   no build, so it cannot be checked and is refused as stale, never applied.
+# mcp_pin_target <pin> / mcp_pin_built <pin> : the composition / the built= id of a valid pin.
+# mcp_built_id <pkgdir> : the build dist/ holds — the .built-from sha, or `none` (no stamp, or not
+#   a sha). A stranded .dist.bak is what the engine's next run restores before it builds, so it is
+#   read first. rc 1 when the stamp exists but cannot be read: callers offer no pin / build nothing.
+mcp_fork_pin_listing(){
+  local dir="$1" base="$2" remote="$3" bsha feats
+  bsha="$(git -C "$dir" rev-parse -q --verify "$base^{commit}")" || return 1
+  feats="$(git -C "$dir" for-each-ref --format='%(refname:short) %(objectname)' "refs/remotes/$remote/feat")" || return 1
+  feats="$(printf '%s\n' "$feats" | LC_ALL=C sort)"   # explicit byte order: one canonical form, whoever lists
+  printf '%s %s\n' "$base" "$bsha"
+  [ -z "$feats" ] || printf '%s\n' "$feats"
+}
+mcp_fork_pin(){
+  local remote="$1" r s pin="" n
+  while read -r r s; do
+    [ -n "$r" ] || continue
+    if [ -z "$pin" ]; then pin="main=$s"; continue; fi
+    n="${r#"$remote"/}"
+    case "$n" in feat/*) ;; *) return 1 ;; esac
+    case "$n" in *[!A-Za-z0-9._/-]*) return 1 ;; esac
+    pin="$pin,$n=$s"
+  done
+  [ -n "$pin" ] || return 1
+  _mcp_pin_match fork target "$pin" || return 1
+  printf '%s\n' "$pin"
+}
+# _mcp_pin_match <kind> <target|built> <value> : one part of a pin against its kind's form.
+_mcp_pin_match(){
+  local re
+  case "$1:$2" in
+    fork:target)     re='^main=[0-9a-f]{40}(,feat/[A-Za-z0-9._/-]+=[0-9a-f]{40})*$' ;;
+    checkout:target) re='^[0-9a-f]{40}$' ;;
+    npm:target)      re='^[0-9A-Za-z][0-9A-Za-z.+-]*$' ;;
+    fork:built|checkout:built) re='^([0-9a-f]{40}|none)$' ;;
+    npm:built)       re='^[0-9A-Za-z][0-9A-Za-z.+-]*$' ;;   # a version, or none
+    *)               return 1 ;;
+  esac
+  case "$3" in *"
+"*) return 1 ;; esac   # one line only: grep would accept a multi-line value on its first line
+  printf '%s\n' "$3" | grep -Eq "$re"
+}
+mcp_pin_valid(){
+  case "$2" in *,built=*) ;; *) return 1 ;; esac
+  _mcp_pin_match "$1" target "${2%,built=*}" && _mcp_pin_match "$1" built "${2##*,built=}"
+}
+mcp_pin_unbuilt(){
+  case "$2" in *,built=*) return 1 ;; esac
+  _mcp_pin_match "$1" target "$2"
+}
+# mcp_npm_applied <name> : the version recorded in <name>.applied (empty when none is recorded).
+#   rc 1 when the file exists but cannot be read: callers offer no pin and record nothing.
+mcp_npm_applied(){
+  local f="$MCP_UPDATE_STATE/$1.applied"
+  [ -e "$f" ] || return 0
+  cat "$f" || return 1
+}
+mcp_pin_target(){ printf '%s' "${1%,built=*}"; }
+mcp_pin_built(){ printf '%s' "${1##*,built=}"; }
+mcp_pin_with_built(){ printf '%s,built=%s' "$1" "$2"; }
+mcp_built_id(){
+  local f="$1/dist/.built-from" v
+  [ -e "$1/.dist.bak" ] && f="$1/.dist.bak/.built-from"
+  [ -e "$f" ] || { printf 'none'; return 0; }
+  v="$(head -1 "$f")" || return 1
+  if printf '%s\n' "$v" | grep -Eq '^[0-9a-f]{40}$'; then printf '%s' "$v"; else printf 'none'; fi
+}
+mcp_pin_form(){
+  case "$1" in
+    fork)     printf 'main=<sha>[,feat/<name>=<sha>]...,built=<sha|none> (40-hex shas), as the report printed it' ;;
+    checkout) printf '<origin/<branch> commit>,built=<sha|none> (40 hex), as the report printed it' ;;
+    npm)      printf '<published version>,built=<version|none>, as the report printed it' ;;
+    *)        printf 'nothing (the shape is invalid)' ;;
+  esac
+}
+
 # --- one install path ---------------------------------------------------------
 # ensure_mcp_server [name] : the ONE way a fork/checkout/npm-canary source gets
 # cloned + built, for both a launcher's own lazy first-launch self-heal AND a

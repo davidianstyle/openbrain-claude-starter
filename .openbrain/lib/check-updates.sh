@@ -4,9 +4,41 @@
 #   --check           cheap, LOCAL-only, on-start-safe nag. No network, never mutates. Honors --snooze.
 #   --full            fetch + consult npm, then AUTO-APPLY every MCP whose policy is auto, then report.
 #   --report          --full without auto-apply (report only).
-#   --apply <mcp>     update one MCP now, per its declared shape (the user's go; either mode):
+#   --apply <mcp> [--pin <pin>]
+#                     update one MCP now, per its declared shape (the user's go; either mode):
 #                       fork -> mcp-local-build.sh <mcp>; checkout -> mcp-local-build.sh --checkout ...;
 #                       npm  -> record the latest published version (the launcher pins to it).
+#                     --pin: build EXACTLY what the report offered — the pin IS the composition.
+#                     fork: main=<sha>[,feat/<name>=<sha>]... (origin/main + each fork/feat/* tip
+#                     the report saw); the engine rebuilds local-build from exactly those shas.
+#                     Anything pushed after the offer waits for the next offer; a feat in the old
+#                     local-build but not in the pin is dropped (--offer prints it as `drop`); a
+#                     pinned sha missing after the fetch is a loud `failed`. checkout/canary: the
+#                     origin/<branch> sha; built as-is, or `held` (exit 4, nothing built) when HEAD
+#                     is still past it with commits touching the package (local unpushed commits,
+#                     or another server's apply moved a shared checkout). npm: records the pinned
+#                     version. Every pin ends in ,built=<id>: the build the offer was made against
+#                     (dist/.built-from, or the recorded npm version; `none` when there is none).
+#                     Under the same lock as the apply, before anything is built or recorded, a go
+#                     whose built= is not the current build is `stale` (exit 5, nothing built or recorded);
+#                     the rule and its revert limit are in /brain-update-check (Stale offers). A pin with no built= names
+#                     no build and is refused the same way. Re-run the report / --offer instead.
+#                     When no pin can be computed (unreadable refs, no origin/<branch>, a
+#                     feat name the token cannot carry, registry down) the report says CANNOT-CHECK
+#                     and offers NO --apply for that MCP — never a silent bare one.
+#                     No --pin = whatever is live at apply time: a direct human command only — the
+#                     skill always passes the printed pin. auto (--full) applies unpinned: its
+#                     consent is the standing policy, and the post-apply re-check reports the result.
+#                     Setup remedies (missing, shape-mismatch) carry no pin: there is no fetched state to pin.
+#   --offer <mcp>     fetch that one MCP, then print its pinned --apply and one line per entry: `new`
+#                     (the go lands it), `have` (local-build has it), `drop` (local-build has it, the
+#                     go removes it) — for /push-mcp-change step 6. Exit 0 an offer printed · 20 no
+#                     pinned offer possible (fetch or pin failed; says why).
+#   --plain <class> <name>
+#                     print the plain-words sentence for a finding class (diagnostic; rc 1 = no entry).
+#   PLAIN WORDS: every technical finding / CANNOT-CHECK / apply-outcome line the report prints is
+#                     followed by one `  in plain words: ...` line (table: plain_line, keyed by class). The
+#                     machine streams (--raw, --auto-raw) are unchanged. A CLEAN run prints nothing new.
 #   --snooze          acknowledge the current FINDINGS (silences --check until they change).
 #                     CANNOT-CHECK is never snoozed: missing evidence is reported every time.
 #
@@ -61,6 +93,7 @@ PS_FILE="${MCP_PS_FILE:-}"                # tests: canned `ps -axo pid=,lstart=,
 NETWORK=0
 NO_FETCH="${MCP_NO_FETCH:-0}"
 RESTART_MSG="installed — restart Claude Code to apply"
+TAB="$(printf '\t')"
 
 log(){ printf '%s\n' "$*" >&2; }
 
@@ -191,13 +224,13 @@ check_origin(){
 # finding) or what an interrupted build left behind (its last-good dist/ -> stranded-build;
 # the next build run restores it). Either way it is excluded from the dirty-tree check,
 # which would otherwise call it uncommitted work.
-stranded_build(){
+stranded_build(){   # <name> <pkgdir> <checkout> <apply-cmd>
   local lk="$3.openbrain-build.lock"
   [ -e "$2/.dist.bak" ] || return 0
   if [ -d "$lk" ] && ! _mcp_lock_stale "$lk"; then
     I "$1" "build in progress ($lk is held) — $2/.dist.bak is that build's backup, not a leftover"
   else
-    F "$1" stranded-build "--apply $1   # an interrupted build left the last-good dist/ in $2/.dist.bak — --apply restores it and rebuilds"
+    F "$1" stranded-build "$4   # an interrupted build left the last-good dist/ in $2/.dist.bak — --apply restores it and rebuilds"
   fi
 }
 
@@ -241,23 +274,44 @@ check_fork(){
         F "$name" fork-mismatch "!git -C $dir remote set-url $FORK_REMOTE $want_fork   # was: $actual_fork"
       fi ;;
   esac
+  # The apply pin: the composition this check sees (origin/main + every fork/feat/* tip, by sha).
+  # Every --apply offered below carries it, so a go builds exactly this.
+  local pin acmd thencmd listing bid pinwhy=""
+  if ! listing="$(mcp_fork_pin_listing "$dir" origin/main "$FORK_REMOTE")"; then
+    pin=""; pinwhy="origin/main and the $FORK_REMOTE/feat/* tips cannot be read in $dir"
+  elif ! pin="$(printf '%s\n' "$listing" | mcp_fork_pin "$FORK_REMOTE")"; then
+    pin=""; pinwhy="a $FORK_REMOTE/feat/* name outside [A-Za-z0-9._/-] cannot be carried in a pin — rename it"
+  elif bid="$(mcp_built_id "$dir")"; then
+    pin="$(mcp_pin_with_built "$pin" "$bid")"
+  else
+    pin=""; pinwhy="$dir/dist/.built-from cannot be read, so no offer can name the build it replaces"
+  fi
+  if [ -n "$pin" ]; then acmd="--apply $name --pin $pin"; thencmd="$acmd"
+  else
+    # never degrade to a bare --apply: that would land whatever is live at apply time
+    C "$name" "no apply pin ($pinwhy) — no --apply can be offered that lands exactly what is shown"
+    acmd="!no pinned --apply can be offered — see the CANNOT-CHECK for $name"; thencmd="re-run /brain-update-check once that CANNOT-CHECK is fixed"
+  fi
   if ! git -C "$dir" rev-parse -q --verify local-build >/dev/null 2>&1; then
-    F "$name" no-local-build "--apply $name"; return 0
+    F "$name" no-local-build "$acmd"; return 0
   fi
   head="$(git -C "$dir" rev-parse local-build)"
   # The stamp only proves dist/ was built from local-build while HEAD is on it: a hand
   # build on another branch leaves the old stamp in place (tsc never deletes it).
-  cur="$(git -C "$dir" symbolic-ref -q --short HEAD || echo DETACHED)"
-  [ "$cur" = local-build ] || F "$name" off-branch "!git -C $dir switch local-build   # the fork runs dist/ built on local-build; HEAD is $cur, so dist/ may hold a build of it — then --apply $name"
+  cur="$(git -C "$dir" symbolic-ref -q --short HEAD)" || cur=""
+  if [ "$cur" != local-build ]; then
+    [ -n "$cur" ] || cur="detached at $(git -C "$dir" rev-parse --short HEAD 2>/dev/null || echo '?')"
+    F "$name" off-branch "!git -C $dir switch local-build   # the fork runs dist/ built on local-build; HEAD is $cur, so dist/ may hold a build of it — then $thencmd"
+  fi
   built="$(cat "$dir/dist/.built-from" 2>/dev/null || true)"
   if [ -f "$dir/dist/index.js" ] && ! mcp_stamped "$dir"; then
-    F "$name" unproven-build "--apply $name   # dist has no provenance marker (an interrupted, mixed, hand or pre-provenance build); it still runs until rebuilt"
+    F "$name" unproven-build "$acmd   # dist has no provenance marker (an interrupted, mixed, hand or pre-provenance build); it still runs until rebuilt"
   else
-    [ "$built" = "$head" ] || F "$name" dist-stale "--apply $name"
+    [ "$built" = "$head" ] || F "$name" dist-stale "$acmd"
   fi
-  stranded_build "$name" "$dir" "$dir"
+  stranded_build "$name" "$dir" "$dir" "$acmd"
   dirty="$(git -C "$dir" status --porcelain -- . ':(exclude).dist.bak')" || { C "$name" "git status failed in $dir"; return 0; }
-  [ -z "$dirty" ] || F "$name" dirty-tree "!commit or stash in $dir, then --apply $name"
+  [ -z "$dirty" ] || F "$name" dirty-tree "!commit or stash in $dir, then $thencmd"
   head_main="$(git -C "$dir" rev-parse -q --verify origin/main || true)"
   [ -n "$head_main" ] || { C "$name" "no origin/main ref in $dir"; return 0; }
   # Behind = origin/main is not contained in local-build. An upstream force-push leaves
@@ -265,7 +319,7 @@ check_fork(){
   rc=0; git -C "$dir" merge-base --is-ancestor "$head_main" local-build || rc=$?
   case "$rc" in
     0) : ;;
-    1) F "$name" source-behind "--apply $name   # origin/main ${head_main:0:7} is not in local-build" ;;
+    1) F "$name" source-behind "$acmd   # origin/main ${head_main:0:7} is not in local-build" ;;
     *) C "$name" "git merge-base failed in $dir (rc $rc) — cannot tell whether local-build is behind origin/main" ;;
   esac
   refs="$(git -C "$dir" for-each-ref --format='%(refname:short)' "refs/remotes/$FORK_REMOTE")" \
@@ -277,7 +331,7 @@ check_fork(){
         rc=0; git -C "$dir" merge-base --is-ancestor "$ref" local-build || rc=$?
         case "$rc" in
           0) : ;;
-          1) F "$name" source-behind "--apply $name   # $ref $(git -C "$dir" rev-parse --short "$ref") is not in local-build" ;;
+          1) F "$name" source-behind "$acmd   # $ref $(git -C "$dir" rev-parse --short "$ref") is not in local-build" ;;
           *) C "$name" "git merge-base failed for $ref (rc $rc) — cannot tell whether local-build carries it" ;;
         esac
         continue ;;
@@ -307,13 +361,13 @@ check_fork(){
   hand="$(git -C "$dir" rev-list --first-parent --no-merges local-build --not "$head_main" $feats)" \
     || { C "$name" "git rev-list failed in $dir — cannot tell whether local-build carries hand commits"; return 0; }
   if [ -n "$hand" ]; then
-    F "$name" unpushed "!move them to $FORK_REMOTE/feat/<slug>, or drop them: git -C $dir switch -C local-build origin/main — then --apply $name   # $(printf '%s\n' "$hand" | grep -c . || true) commit(s) on local-build outside origin/main and $FORK_REMOTE/feat/* (a hand commit, or upstream rewrote main); --apply refuses to drop them"
-  elif [ -n "$lost" ]; then F "$name" source-behind "--apply $name   # local-build carries $(printf '%s\n' "$lost" | grep -c . || true) commit(s) in neither origin/main nor any live $FORK_REMOTE/feat/* (a feature branch deleted on the fork?) — --apply rebuilds without them"; fi
+    F "$name" unpushed "!move them to $FORK_REMOTE/feat/<slug>, or drop them: git -C $dir switch -C local-build origin/main — then re-run /brain-update-check for a fresh offer (pushing a feat changes the source, so no pin from now would still hold)   # $(printf '%s\n' "$hand" | grep -c . || true) commit(s) on local-build outside origin/main and $FORK_REMOTE/feat/* (a hand commit, or upstream rewrote main); --apply refuses to drop them"
+  elif [ -n "$lost" ]; then F "$name" source-behind "$acmd   # local-build carries $(printf '%s\n' "$lost" | grep -c . || true) commit(s) in neither origin/main nor any live $FORK_REMOTE/feat/* (a feature branch deleted on the fork?) — --apply rebuilds without them"; fi
   return 0
 }
 
 check_checkout(){
-  local name="$1" l="$2" dir sub branch entry cur built up behind ahead tb th dirty
+  local name="$1" l="$2" dir sub branch entry cur built up behind ahead tb th dirty acmd thencmd bid
   dir="$(mcp_root "$l")"; case "$dir" in INVALID:*) C "$name" "${dir#INVALID:}"; return 0 ;; esac
   sub="$(mcp_sub "$l")"
   branch="$(mcp_get "$l" branch)"; case "$branch" in INVALID:*) C "$name" "${branch#INVALID:}"; return 0 ;; esac
@@ -321,23 +375,34 @@ check_checkout(){
   [ -d "$dir" ] || { F "$name" missing "--apply $name   # or just launch it: the launcher lazy-installs"; return 0; }
   [ -d "$dir/.git" ] || { C "$name" "$dir exists but is not a git checkout"; return 0; }
   check_origin "$name" "$l" "$dir"
-  cur="$(git -C "$dir" symbolic-ref -q --short HEAD || echo DETACHED)"
-  [ "$cur" = "$branch" ] || F "$name" off-branch "!git -C $dir switch $branch   # the build tracks $branch; HEAD is $cur — or, if that's intentional, set $name.branch=$cur in $MCP_CONFIG_FILE"
-  stranded_build "$name" "$(pkgdir "$l")" "$dir"
+  # The apply pin: the origin/<branch> commit this check compares against. Every --apply
+  # offered below carries it, so a go builds exactly that commit, never a newer tip.
+  up="$(git -C "$dir" rev-parse -q --verify "origin/$branch" || true)"
+  if [ -n "$up" ] && bid="$(mcp_built_id "$(pkgdir "$l")")"; then acmd="--apply $name --pin $(mcp_pin_with_built "$up" "$bid")"; thencmd="$acmd"
+  else   # a missing origin/<branch> is reported as CANNOT-CHECK below; never a bare --apply
+    [ -z "$up" ] || C "$name" "$(pkgdir "$l")/dist/.built-from cannot be read — no --apply can be offered that names the build it replaces"
+    acmd="!no pinned --apply can be offered — see the CANNOT-CHECK for $name"; thencmd="re-run /brain-update-check once that CANNOT-CHECK is fixed"
+  fi
+  cur="$(git -C "$dir" symbolic-ref -q --short HEAD)" || cur=""
+  if [ -z "$cur" ]; then   # detached (e.g. README's revert): there is no branch to declare
+    F "$name" off-branch "!git -C $dir switch $branch   # the build tracks $branch; HEAD is detached at $(git -C "$dir" rev-parse --short HEAD 2>/dev/null || echo '?') (a revert or a hand checkout) — switch back to go forward, then $thencmd"
+  elif [ "$cur" != "$branch" ]; then
+    F "$name" off-branch "!git -C $dir switch $branch   # the build tracks $branch; HEAD is $cur — or, if that's intentional, set $name.branch=$cur in $MCP_CONFIG_FILE"
+  fi
+  stranded_build "$name" "$(pkgdir "$l")" "$dir" "$acmd"
   local bak=.dist.bak; [ "$sub" = . ] || bak="$sub/.dist.bak"
   dirty="$(git -C "$dir" status --porcelain -- "$sub" ":(exclude)$bak")" || { C "$name" "git status failed in $dir"; return 0; }
-  [ -z "$dirty" ] || F "$name" dirty-tree "!commit or stash in $(pkgdir "$l"), then --apply $name"
-  up="$(git -C "$dir" rev-parse -q --verify "origin/$branch" || true)"
+  [ -z "$dirty" ] || F "$name" dirty-tree "!commit or stash in $(pkgdir "$l"), then $thencmd"
   if [ -z "$up" ]; then C "$name" "no origin/$branch ref in $dir"; else
     behind="$(git -C "$dir" rev-list --count "HEAD..origin/$branch" -- "$sub")" || { C "$name" "rev-list failed"; return 0; }
     ahead="$(git -C "$dir" rev-list --count "origin/$branch..HEAD" -- "$sub")"   || { C "$name" "rev-list failed"; return 0; }
-    [ "$behind" -eq 0 ] || F "$name" source-behind "--apply $name   # $behind commit(s) on origin/$branch touch $sub"
+    [ "$behind" -eq 0 ] || F "$name" source-behind "$acmd   # $behind commit(s) on origin/$branch touch $sub"
     [ "$ahead"  -eq 0 ] || F "$name" unpushed "!git -C $dir push   # $ahead local commit(s) touch $sub (runs only on this machine)"
   fi
-  [ -f "$entry" ] || { F "$name" no-dist "--apply $name"; return 0; }
+  [ -f "$entry" ] || { F "$name" no-dist "$acmd"; return 0; }
   built="$(cat "$(pkgdir "$l")/dist/.built-from" 2>/dev/null || true)"
   if [ -z "$built" ] || ! git -C "$dir" cat-file -e "$built^{commit}" 2>/dev/null; then
-    F "$name" unproven-build "--apply $name   # dist has no provenance marker; rebuild records one"
+    F "$name" unproven-build "$acmd   # dist has no provenance marker; rebuild records one"
     return 0
   fi
   # Compare the package's SOURCE TREE, not the commit (sibling commits in a monorepo must not
@@ -345,7 +410,7 @@ check_checkout(){
   local tspec=":$sub"; [ "$sub" = . ] && tspec="^{tree}"
   tb="$(git -C "$dir" rev-parse -q --verify "$built$tspec")" || { C "$name" "cannot resolve $sub at ${built:0:7}"; return 0; }
   th="$(git -C "$dir" rev-parse -q --verify "HEAD$tspec")"   || { C "$name" "cannot resolve $sub at HEAD"; return 0; }
-  [ "$tb" = "$th" ] || F "$name" dist-stale "--apply $name   # built from ${built:0:7}; $sub source differs at HEAD"
+  [ "$tb" = "$th" ] || F "$name" dist-stale "$acmd   # built from ${built:0:7}; $sub source differs at HEAD"
   return 0
 }
 
@@ -353,15 +418,22 @@ check_npm(){
   local name="$1" l="$2" pkg src sub applied_ver latest githead changed
   pkg="$(decl_get "$l" pkg)"
   [ -n "$pkg" ] || { F "$name" bad-declaration "!shape=npm needs pkg= in $(basename "$l")"; return 0; }
-  applied_ver="$(cat "$STATE/$name.applied" 2>/dev/null || true)"
-  [ -n "$applied_ver" ] || F "$name" unpinned "--apply $name   # no applied version recorded — the launcher floats to latest"
+  applied_ver="$(mcp_npm_applied "$name")" \
+    || { C "$name" "$STATE/$name.applied cannot be read — no --apply can be offered that names the recorded version"; return 0; }
+  latest=""
   if [ "$NETWORK" -eq 1 ]; then
     latest="$("$NPM" view "$pkg" version 2>/dev/null)" || { C "$name" "npm registry lookup failed for $pkg"; latest=""; }
-    if [ -n "$latest" ] && [ -n "$applied_ver" ] && [ "$latest" != "$applied_ver" ]; then
-      F "$name" update-available "--apply $name   # $applied_ver -> $latest"
-    fi
   else
     V deferred "$name: registry comparison (--full only)"
+  fi
+  # The apply pin is the version shown: a go records exactly it, never a newer publish.
+  if [ -z "$applied_ver" ]; then
+    if [ -n "$latest" ]; then F "$name" unpinned "--apply $name --pin $(mcp_pin_with_built "$latest" none)   # no applied version recorded — the launcher floats to latest"
+    elif [ "$NETWORK" -eq 1 ]; then F "$name" unpinned "!no pinned --apply can be offered — see the CANNOT-CHECK for $name (the registry gives the version to pin)"
+    else F "$name" unpinned "!run /brain-update-check (--full): the registry lookup gives the version to pin   # no applied version recorded — the launcher floats to latest"; fi
+  fi
+  if [ -n "$latest" ] && [ -n "$applied_ver" ] && [ "$latest" != "$applied_ver" ]; then
+    F "$name" update-available "--apply $name --pin $(mcp_pin_with_built "$latest" "$applied_ver")   # $applied_ver -> $latest"
   fi
   check_stale "$name" "$l" npm "$applied_ver"
   sub="$(mcp_sub "$l")"
@@ -573,17 +645,18 @@ fetch_all(){
 # ---------------------------------------------------------------------------
 applog(){ mkdir -p "$STATE"; printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$1" "$2" "$3" "$4" >> "$STATE/applied.log"; }
 
-# run_engine <name> <launcher> : the engine takes the build lock itself and holds it for
-# the whole build (this script never holds it around the engine).
+# run_engine <name> <launcher> [pin] : the engine takes the build lock itself and holds it for
+# the whole build (this script never holds it around the engine). The pin is always set
+# explicitly (empty = unpinned), so an inherited MCP_APPLY_PIN can never leak into an apply.
 run_engine(){
-  local l="$2" dir url branch fork
+  local l="$2" dir url branch fork pin="${3:-}"
   dir="$(mcp_root "$l")"
   case "$(mcp_eff_shape "$l")" in          # npm on the canary channel builds as a checkout
     fork)
       # the shared prepare step: clone if missing, add the fork remote a fresh <l>.fork= names
       url="$(mcp_get "$l" url)"; fork="$(mcp_get "$l" fork)"
       ( _mcp_prepare_checkout "$l" fork "$dir" "$url" "" "$fork" ) || { log "could not clone $dir or add its '$FORK_REMOTE' remote"; return 1; }
-      bash "$APPLY_SH" "$l" ;;             # launcher PATH — the engine resolves dir= through mcp_get itself
+      MCP_APPLY_PIN="$pin" bash "$APPLY_SH" "$l" ;;             # launcher PATH — the engine resolves dir= through mcp_get itself
     checkout)
       branch="$(mcp_get "$l" branch)"; case "$branch" in INVALID:*) log "${branch#INVALID:}"; return 1 ;; esac
       if [ ! -d "$dir/.git" ]; then
@@ -592,23 +665,37 @@ run_engine(){
         # clone never leaves a partial checkout
         ( _mcp_prepare_checkout "$l" checkout "$dir" "$url" "$branch" "" ) || { log "clone failed"; return 1; }
       fi
-      bash "$APPLY_SH" --checkout "$1" "$dir" "$(mcp_sub "$l")" "$branch" "$(mcp_get "$l" entry)" ;;
+      MCP_APPLY_PIN="$pin" bash "$APPLY_SH" --checkout "$1" "$dir" "$(mcp_sub "$l")" "$branch" "$(mcp_get "$l" entry)" ;;
   esac
 }
 
-# apply_one <name> <launcher> <how> : the one apply path (how = explicit | auto, for the log).
+# apply_one <name> <launcher> <how> [pin] : the one apply path (how = explicit | auto, for the log).
 # The engine's tests gate the build and keep the last-good dist on failure.
-# Emits one `act` line: applied | failed.
+# Emits one `act` line: applied | failed | held (pinned checkout whose HEAD is past the approved
+# commit: nothing built) | stale (the pin's built= is not the current build: nothing built). The
+# engine writes why to the verdict file, so a stray rc never reads as held or stale.
 apply_one(){
-  local name="$1" l="$2" how="$3" pkg old new dir why
+  local name="$1" l="$2" how="$3" pin="${4:-}" pkg old new dir why rc=0 vf held="" stale=""
   pkg="$(pkgdir "$l")"
   case "$(mcp_eff_shape "$l")" in
-    npm)     apply_npm "$name" "$l" "$how"; return 0 ;;
+    npm)     apply_npm "$name" "$l" "$how" "$pin"; return 0 ;;
     invalid) why="$(_mcp_build_shape "$l")"; printf 'act\t%s\tfailed\t%s\n' "$name" "${why#INVALID:}"; return 0 ;;
   esac
   dir="$(mcp_root "$l")"; case "$dir" in INVALID:*) printf 'act\t%s\tfailed\t%s\n' "$name" "${dir#INVALID:}"; return 0 ;; esac
   old="$(cat "$pkg/dist/.built-from" 2>/dev/null || true)"
-  if ! run_engine "$name" "$l" >&2; then
+  vf="$(mktemp "${TMPDIR:-/tmp}/mcp-verdict.XXXXXX")" || { printf 'act\t%s\tfailed\tcannot create a temp file\n' "$name"; return 0; }
+  MCP_APPLY_VERDICT="$vf" run_engine "$name" "$l" "$pin" >&2 || rc=$?
+  [ "$rc" -ne 75 ] || held="$(cat "$vf")"
+  [ "$rc" -ne 76 ] || stale="$(cat "$vf")"; rm -f "$vf"
+  if [ -n "$stale" ]; then
+    applog "$name" "$how" "stale" "pin ${pin:0:7}"
+    printf 'act\t%s\tstale\t%s\n' "$name" "$stale"; return 0
+  fi
+  if [ -n "$held" ]; then
+    applog "$name" "$how" "held" "pin ${pin:0:7}"
+    printf 'act\t%s\theld\t%s\n' "$name" "$held"; return 0
+  fi
+  if [ "$rc" -ne 0 ]; then
     printf 'act\t%s\tfailed\tengine refused, could not take the build lock, or build/tests failed — last-good build still in place (see output above)\n' "$name"
     applog "$name" "$how" "failed" "${old:0:7}"; return 0
   fi
@@ -617,13 +704,38 @@ apply_one(){
   printf 'act\t%s\tapplied\t%s -> %s — %s\n' "$name" "${old:0:7}" "${new:0:7}" "$RESTART_MSG"
 }
 
-apply_npm(){  # record the latest publish as the applied version; the launcher pins to it (no test gate)
-  local name="$1" l="$2" pkg latest prev
+# The read-compare-write of <name>.applied runs under a lock on that file (the npm counterpart of
+# the build lock), so a pinned go's stale check and its write see the same recorded version.
+apply_npm(){  # record the latest publish (or exactly the pinned one) as the applied version; the launcher pins to it (no test gate)
+  local name="$1" l="$2" pin="${4:-}" pkg latest prev want=""
   pkg="$(decl_get "$l" pkg)"
-  latest="$("$NPM" view "$pkg" version 2>/dev/null)" || { printf 'act\t%s\tfailed\tnpm registry lookup failed for %s\n' "$name" "$pkg"; return 0; }
+  if [ -n "$pin" ]; then
+    want="$(mcp_pin_built "$pin")"; pin="$(mcp_pin_target "$pin")"
+    latest="$("$NPM" view "$pkg@$pin" version 2>/dev/null)" || { printf 'act\t%s\tfailed\tnpm registry lookup failed for %s@%s\n' "$name" "$pkg" "$pin"; return 0; }
+    [ "$latest" = "$pin" ] || { printf 'act\t%s\tfailed\t%s@%s is not a published version (the registry answered: %s) — nothing recorded\n' "$name" "$pkg" "$pin" "${latest:-nothing}"; return 0; }
+  else
+    latest="$("$NPM" view "$pkg" version 2>/dev/null)" || { printf 'act\t%s\tfailed\tnpm registry lookup failed for %s\n' "$name" "$pkg"; return 0; }
+  fi
   mkdir -p "$STATE"
-  prev="$(cat "$STATE/$name.applied" 2>/dev/null || true)"
-  printf '%s\n' "$latest" > "$STATE/$name.applied"
+  _mcp_lock_acquire "$STATE/$name.applied" || { printf 'act\t%s\tfailed\tcould not take the lock on %s — nothing recorded\n' "$name" "$STATE/$name.applied"; return 0; }
+  if ! prev="$(mcp_npm_applied "$name")"; then
+    _mcp_lock_release
+    printf 'act\t%s\tfailed\t%s cannot be read, so the recorded version is unknown — nothing recorded\n' "$name" "$STATE/$name.applied"
+    return 0
+  fi
+  if [ -n "$want" ] && [ "$want" != "${prev:-none}" ]; then
+    _mcp_lock_release
+    applog "$name" "$3" "stale" "pin $pin"
+    printf 'act\t%s\tstale\tthe offer was made against version %s, but the recorded version is %s (an apply ran after the offer) — applying it could move the version backward. Nothing recorded; re-run /brain-update-check (or --offer %s) for a fresh offer.\n' "$name" "$want" "${prev:-none}" "$name"
+    return 0
+  fi
+  if ! printf '%s\n' "$latest" > "$STATE/$name.applied"; then
+    _mcp_lock_release
+    applog "$name" "$3" "failed" "cannot write $name.applied"
+    printf 'act\t%s\tfailed\tcould not write %s — nothing recorded; the launcher still runs %s\n' "$name" "$STATE/$name.applied" "${prev:-the latest publish}"
+    return 0
+  fi
+  _mcp_lock_release
   applog "$name" "$3" "applied" "${prev:-unpinned} -> $latest"
   printf 'act\t%s\tapplied\tpinned %s (was %s) — %s\n' "$name" "$latest" "${prev:-unpinned}" "$RESTART_MSG"
 }
@@ -652,19 +764,72 @@ outcome(){  # stdin = findings stream -> exit code (here-strings: `printf | grep
   return 0
 }
 
+# plain_line <key> <name> : the everyday-words companion of a technical line (the user may read these
+# on a phone). ONE table, keyed by finding class — `act:<verdict>` for an apply outcome, `cannot` for a
+# CANNOT-CHECK. Generated, never hand-written per call site: a class with no entry returns 1 (the report
+# then prints a loud generic line, and the presence/completeness tests in mcp-update-flow.sh section Q go red).
+# Say what is wrong and what doing the remedy would DO; no jargon; keep each line under ~110 chars.
+plain_line(){
+  local k="$1" n="$2"
+  case "$k" in
+    source-behind)         printf 'a newer version of %s is available; applying rebuilds it with the new code' "$n" ;;
+    dist-stale)            printf "%s's running copy is older than its code; applying rebuilds it to match" "$n" ;;
+    unproven-build)        printf "can't tell which code %s's running copy came from; applying rebuilds it so it is known" "$n" ;;
+    no-dist)               printf '%s has never been built on this machine; applying builds it' "$n" ;;
+    no-local-build)        printf "%s's combined build does not exist yet; applying creates it from the latest code" "$n" ;;
+    stranded-build)        printf 'a build of %s was interrupted; applying puts back the last working copy and rebuilds' "$n" ;;
+    update-available)      printf 'a newer published version of %s exists; applying switches to it' "$n" ;;
+    unpinned)              printf '%s follows whatever is newest; applying locks it to the version shown' "$n" ;;
+    stale-process)         printf 'open Claude sessions still run an old %s; restarting Claude Code switches them over' "$n" ;;
+    publish-lag)           printf '%s has changes that are not published yet; publishing is public, so it needs your go' "$n" ;;
+    missing)               printf "%s isn't installed on this machine; the fix downloads and builds it" "$n" ;;
+    shape-mismatch)        printf '%s is set up two conflicting ways; the fix makes the setup agree with itself' "$n" ;;
+    dirty-tree)            printf "%s's folder has unsaved edits; save or set them aside first, then update" "$n" ;;
+    off-branch)            printf "%s's code folder is on a different line of work than expected; switch it back first" "$n" ;;
+    unpushed)              printf '%s has local changes that exist only on this machine; push or drop them first' "$n" ;;
+    unenrolled)            printf "an extra code line of %s is not named so updates include it, so it is left out; rename or delete it" "$n" ;;
+    fork-mismatch)         printf "%s points at a different copy of your fork than the settings say; make them agree" "$n" ;;
+    origin-mismatch)       printf '%s downloads from a different place than the settings say; make them agree' "$n" ;;
+    unsupported-key)       printf "%s has a setting its builder can't honor, so builds stop; remove that setting" "$n" ;;
+    bad-declaration)       printf "%s's launcher file is malformed or contradicts itself; updates can't be checked until fixed" "$n" ;;
+    bad-policy)            printf 'your update-settings file has a line that cannot be read; fix it so the settings apply' ;;
+    undeclared)            printf "%s's launcher doesn't say how to update it; usually the install is behind, so redeploy" "$n" ;;
+    undeclared-server)     printf "%s is connected but unknown to the update checker, so it is not checked; describe it" "$n" ;;
+    bypasses-launcher)     printf '%s starts without its launcher, so its updates are not tracked; re-register it' "$n" ;;
+    dangling-registration) printf '%s is registered, but the program it points to is gone; re-register to repair it' "$n" ;;
+    act:applied)           printf '%s was updated; restart Claude Code to start using it' "$n" ;;
+    act:held)              printf '%s was left alone because something needs fixing by hand first; nothing was changed' "$n" ;;
+    act:stale)             printf '%s was left alone: the offer you approved is out of date; get a fresh one and approve that' "$n" ;;
+    act:failed)            printf 'the update of %s did not finish; the old working copy is still in place' "$n" ;;
+    cannot)                if [ "$n" = - ]; then printf 'the checker could not finish, so nothing is confirmed; this is not a clean result'
+                           else printf "couldn't check %s this time, so it is not confirmed up to date; nothing was changed" "$n"; fi ;;
+    *) return 1 ;;
+  esac
+}
+# plain_or_generic <key> <name> : plain_line, or a loud generic line when a class has no entry (still one line)
+plain_or_generic(){ plain_line "$1" "$2" || printf 'something needs attention with %s (no plain wording for "%s" yet; ask Claude to explain)' "$2" "$1"; }
+plain_out(){ printf '  in plain words: %s\n' "$(plain_or_generic "$1" "$2")"; }
+
 report(){  # $1 = findings stream, $2 = auto-apply stream (optional)
-  local s="$1" a="${2:-}" rc=0
+  local s="$1" a="${2:-}" rc=0 rk rn rcl rr cmd mark
   printf '%s\n' "$s" | outcome || rc=$?
   printf 'Brain update status — MCP servers\n\n'
   if [ -n "$a" ]; then
     printf 'Auto-updates (policy):\n'
-    printf '%s\n' "$a" | awk -F'\t' '$1=="act"{printf "  %s %-20s %s\n", ($3=="applied"?"\342\234\223":($3=="held"?"\342\217\270":"\342\234\227")), $2, $3 ": " $4}'
+    while IFS=$'\t' read -r rk rn rcl rr; do
+      [ "$rk" = act ] || continue
+      case "$rcl" in applied) mark="\342\234\223" ;; held) mark="\342\217\270" ;; *) mark="\342\234\227" ;; esac
+      printf '  %b %-20s %s\n' "$mark" "$rn" "$rcl: $rr"; plain_out "act:$rcl" "$rn"
+    done <<< "$a"
     printf '\n'
   fi
-  printf '%s\n' "$s" | awk -F'\t' '
-    $1=="mcp"   { cmd=$4; if (substr(cmd,1,1)=="!") sub(/^!/,"",cmd); else cmd="check-updates.sh " cmd;
-                  printf "  \342\232\240 %-22s %-18s -> %s\n",$2,$3,cmd }
-    $1=="cannot"{ printf "  ? CANNOT-CHECK %-14s %s\n",$2,$3 }'
+  while IFS=$'\t' read -r rk rn rcl rr; do      # stream order; each technical line is followed by its plain-words line
+    case "$rk" in
+      mcp)    cmd="$rr"; case "$cmd" in '!'*) cmd="${cmd#!}" ;; *) cmd="check-updates.sh $cmd" ;; esac
+              printf '  \342\232\240 %-22s %-18s -> %s\n' "$rn" "$rcl" "$cmd"; plain_out "$rcl" "$rn" ;;
+      cannot) printf '  ? CANNOT-CHECK %-14s %s\n' "$rn" "$rcl"; plain_out cannot "$rn" ;;
+    esac
+  done <<< "$s"
   if grep -q '^info' <<< "$s"; then
     printf '\nInfo (not findings):\n'
     printf '%s\n' "$s" | awk -F'\t' '$1=="info"{printf "  i %-22s %s\n",$2,$3}'
@@ -682,7 +847,100 @@ report(){  # $1 = findings stream, $2 = auto-apply stream (optional)
 
 # sig : the snooze signature — FINDINGS only. CANNOT-CHECK never snoozes (see --check), and
 # leaving it out here means snoozed findings stay snoozed when a CANNOT-CHECK clears.
-sig(){ printf '%s\n' "$1" | awk '!/^(cov|info|cannot)\t/' | sort | shasum | awk '{print $1}'; }   # awk, not grep -v: an empty result must not fail under pipefail
+# The ` --pin <x>` in a remedy is stripped first: a pin changes with ANY upstream movement (a
+# monorepo sibling's commit moves origin/<branch>), which is not a change in the findings.
+sig(){ printf '%s\n' "$1" | awk '!/^(cov|info|cannot)\t/ { gsub(/ --pin [^ \t]+/, ""); print }' | sort | shasum | awk '{print $1}'; }   # awk, not grep -v: an empty result must not fail under pipefail
+
+# offer_one <name> <launcher> : --offer. Fetches this one MCP (unless MCP_NO_FETCH=1), then prints
+#   <name>: offer — check-updates.sh --apply <name> --pin <pin>
+#   <name>: new   — <what the go would land>        (one line each)
+#   <name>: have  — <what local-build already has>  (fork only)
+# rc 0 = an offer was printed; rc 20 = no pinned offer is possible (`<name>: cannot — <why>`).
+# A fetch failure is a cannot: an offer built from cached refs could show a set that is not what the go would land.
+offer_one(){
+  local name="$1" l="$2" shape dir listing pin e r sh branch up sub n pkg latest applied setup="" furl heads out lb mrc merges m p2 kept bid
+  _offer_cannot(){ printf '%s: cannot — %s; no pinned offer possible\n' "$name" "$1"; return 20; }
+  shape="$(mcp_eff_shape "$l")"
+  case "$shape" in
+    fork|checkout)
+      dir="$(mcp_root "$l")"; case "$dir" in INVALID:*) _offer_cannot "${dir#INVALID:}"; return 20 ;; esac
+      [ -d "$dir/.git" ] || { _offer_cannot "$dir is not a git checkout yet (a setup step — run /brain-update-check)"; return 20; }
+      if [ "$shape" = fork ] && [ "$(git -C "$dir" remote | grep -c "^${FORK_REMOTE}$" || true)" -eq 0 ]; then
+        # first apply after push-mcp-change step 1 set <l>.fork=: --apply adds the remote. Read the
+        # fork's feat/* tips straight from its URL (read-only), in the engine's listing form, so
+        # the pin is the one the engine computes once it has added + fetched the remote.
+        furl="$(mcp_get "$l" fork)"
+        case "$furl" in ""|INVALID:*) _offer_cannot "$dir has no '$FORK_REMOTE' remote and no usable $name.fork= (shape-mismatch — run /brain-update-check)"; return 20 ;; esac
+        setup=1
+      fi
+      if [ "$NO_FETCH" != 1 ]; then
+        git -C "$dir" fetch -q origin 2>/dev/null || { _offer_cannot "origin fetch failed in $dir"; return 20; }
+        if [ "$shape" = fork ] && [ -z "$setup" ]; then
+          git -C "$dir" fetch -q --prune "$FORK_REMOTE" 2>/dev/null || { _offer_cannot "$FORK_REMOTE fetch failed in $dir"; return 20; }
+        fi
+      fi ;;
+  esac
+  case "$shape" in
+    fork)
+      if [ -n "$setup" ]; then
+        heads="$(git ls-remote --heads "$furl" 2>/dev/null)" || { _offer_cannot "cannot list the branches of $furl"; return 20; }
+        up="$(git -C "$dir" rev-parse -q --verify 'origin/main^{commit}')" || { _offer_cannot "no origin/main ref in $dir"; return 20; }
+        listing="$( { printf 'origin/main %s\n' "$up"
+                      printf '%s\n' "$heads" | awk -v r="$FORK_REMOTE" '$2 ~ /^refs\/heads\/feat\// { sub(/^refs\/heads\//, "", $2); print r "/" $2 " " $1 }' | LC_ALL=C sort; } )"
+      else
+        listing="$(mcp_fork_pin_listing "$dir" origin/main "$FORK_REMOTE")" || { _offer_cannot "origin/main and the $FORK_REMOTE/feat/* tips cannot be read in $dir"; return 20; }
+      fi
+      pin="$(printf '%s\n' "$listing" | mcp_fork_pin "$FORK_REMOTE")" || { _offer_cannot "a $FORK_REMOTE/feat/* name outside [A-Za-z0-9._/-] cannot be carried in a pin — rename it"; return 20; }
+      bid="$(mcp_built_id "$dir")" || { _offer_cannot "$dir/dist/.built-from cannot be read, so the offer cannot name the build it replaces"; return 20; }
+      pin="$(mcp_pin_with_built "$pin" "$bid")"
+      out="$name: offer — check-updates.sh --apply $name --pin $pin"
+      [ -z "$setup" ] || out="$out
+$name: setup — the apply first adds the '$FORK_REMOTE' remote from $name.fork=, then builds the entries below"
+      lb=""; [ -z "$setup" ] && git -C "$dir" rev-parse -q --verify local-build >/dev/null 2>&1 && lb=1
+      while read -r r sh; do            # new = the go lands it; have = local-build already has it
+        e=new
+        if [ -n "$lb" ]; then
+          mrc=0; git -C "$dir" merge-base --is-ancestor "$sh" local-build 2>/dev/null || mrc=$?
+          case "$mrc" in 0) e=have ;; 1) ;; *) _offer_cannot "git merge-base failed comparing $r with local-build"; return 20 ;; esac
+        fi
+        out="$out
+$(printf '%s: %-5s — %s %s' "$name" "$e" "$r" "${sh:0:7}")"
+      done <<< "$listing"
+      if [ -n "$lb" ]; then             # drop = merged into local-build, contained in no pinned entry
+        merges="$(git -C "$dir" rev-list --first-parent --merges local-build --not "$(printf '%s\n' "$listing" | awk 'NR==1{print $2}')")" \
+          || { _offer_cannot "git rev-list failed listing local-build's merges"; return 20; }
+        while read -r m; do
+          [ -n "$m" ] || continue
+          p2="$(git -C "$dir" rev-parse -q --verify "$m^2")" || continue
+          kept=0
+          while read -r r sh; do
+            mrc=0; git -C "$dir" merge-base --is-ancestor "$p2" "$sh" 2>/dev/null || mrc=$?
+            case "$mrc" in 0) kept=1; break ;; 1) ;; *) _offer_cannot "git merge-base failed comparing local-build's ${p2:0:7} with $r"; return 20 ;; esac
+          done <<< "$listing"
+          [ "$kept" = 1 ] && continue
+          r="$(git -C "$dir" log -1 --format=%s "$m" | sed -n "s/^Merge remote-tracking branch '\([^']*\)'.*/\1/p")"
+          out="$out
+$name: drop  — ${r:-a merged branch} ${p2:0:7} (in local-build, gone from the fork: the go removes it)"
+        done <<< "$merges"
+      fi
+      printf '%s\n' "$out" ;;
+    checkout)
+      branch="$(mcp_get "$l" branch)"; case "$branch" in INVALID:*) _offer_cannot "${branch#INVALID:}"; return 20 ;; esac
+      sub="$(mcp_sub "$l")"
+      up="$(git -C "$dir" rev-parse -q --verify "origin/$branch")" || { _offer_cannot "no origin/$branch ref in $dir"; return 20; }
+      n="$(git -C "$dir" rev-list --count "HEAD..$up" -- "$sub")" || { _offer_cannot "git rev-list failed in $dir"; return 20; }
+      bid="$(mcp_built_id "$(pkgdir "$l")")" || { _offer_cannot "$(pkgdir "$l")/dist/.built-from cannot be read, so the offer cannot name the build it replaces"; return 20; }
+      printf '%s: offer — check-updates.sh --apply %s --pin %s\n' "$name" "$name" "$(mcp_pin_with_built "$up" "$bid")"
+      printf '%s: new   — %s commit(s) on origin/%s touching %s, up to %s\n' "$name" "$n" "$branch" "$sub" "${up:0:7}" ;;
+    npm)
+      pkg="$(decl_get "$l" pkg)"
+      latest="$("$NPM" view "$pkg" version 2>/dev/null)" && [ -n "$latest" ] || { _offer_cannot "npm registry lookup failed for $pkg"; return 20; }
+      applied="$(mcp_npm_applied "$name")" || { _offer_cannot "$STATE/$name.applied cannot be read, so the offer cannot name the recorded version"; return 20; }
+      printf '%s: offer — check-updates.sh --apply %s --pin %s\n' "$name" "$name" "$(mcp_pin_with_built "$latest" "${applied:-none}")"
+      printf '%s: new   — %s %s -> %s\n' "$name" "$pkg" "${applied:-unpinned}" "$latest" ;;
+    *) _offer_cannot "invalid declaration — run /brain-update-check"; return 20 ;;
+  esac
+}
 
 need_launcher(){  # need_launcher <mcp> -> sets L
   L="$LIB/$1.sh"
@@ -698,6 +956,10 @@ case "$mode" in
     if [ "$rc" -eq 10 ] && [ -f "$SNOOZE_FILE" ] && [ "$(cat "$SNOOZE_FILE")" = "$(sig "$s")" ]; then exit 0; fi
     n="$(printf '%s\n' "$s" | grep -c '^mcp' || true)"; c="$(printf '%s\n' "$s" | grep -c '^cannot' || true)"
     printf 'OpenBrain: MCP updates — %s finding(s), %s cannot-check. /brain-update-check for details.\n' "$n" "$c"
+    # the plain-words companion (findings path only — a CLEAN check stays silent). It is the LAST line and
+    # stands alone: a caller that keeps only the last line still gets the pointer.
+    printf '  in plain words: your connected tools have %s thing(s) to look at%s. Ask Claude to run /brain-update-check.\n' \
+      "$(( n + c ))" "$( [ "$c" -eq 0 ] || printf ' (%s could not be checked)' "$c" )"
     exit "$rc" ;;
   --full|--report)
     NETWORK=1; log "(fetching MCP checkouts + consulting npm ...)"
@@ -715,16 +977,43 @@ case "$mode" in
     NETWORK="${MCP_NETWORK:-0}"; s="$(all_findings)"; a="$(auto_apply "$s")"
     printf '%s\n' "$a"; s="$(all_findings)"; printf '%s\n' "$s"; printf '%s\n' "$s" | outcome ;;
   --apply)
-    target="${2:?usage: check-updates.sh --apply <mcp>}"; need_launcher "$target"
-    a="$(apply_one "$target" "$L" explicit)"
+    target="${2:?usage: check-updates.sh --apply <mcp> [--pin <pin>]}"; pin=""
+    case "$#:${3:-}" in
+      2:) ;;
+      4:--pin) pin="$4"; [ -n "$pin" ] || { log "usage: check-updates.sh --apply <mcp> [--pin <pin>]   (an empty --pin is refused: it would apply unpinned)"; exit 2; } ;;
+      *) log "usage: check-updates.sh --apply <mcp> [--pin <pin>]   (got: $*)"; exit 2 ;;
+    esac
+    need_launcher "$target"
+    if [ -n "$pin" ]; then   # the pin's form follows the effective shape; a wrong form applies nothing
+      ps="$(mcp_eff_shape "$L")"
+      if mcp_pin_unbuilt "$ps" "$pin"; then   # names no build, so it cannot be checked against the current one
+        applog "$target" explicit "stale" "pin ${pin:0:7} (no built=)"
+        printf '%s: stale — this pin has no built= entry, so it cannot be checked against the current build; applying it could move the build backward. Nothing applied; re-run /brain-update-check (or --offer %s) for a fresh offer.\n' "$target" "$target"
+        plain_out act:stale "$target"; exit 5
+      fi
+      mcp_pin_valid "$ps" "$pin" || { log "$target: malformed --pin '$pin' — expected $(mcp_pin_form "$ps"); nothing applied"; exit 2; }
+    else
+      log "$target: unpinned — applies whatever is live at apply time (/brain-update-check always passes the --pin its report printed)"
+    fi
+    a="$(apply_one "$target" "$L" explicit "$pin")"
     printf '%s\n' "$a" | awk -F'\t' '{print $2": "$3" — "$4}'
-    grep -q $'\tapplied\t' <<< "$a" ;;
+    printf '%s\n' "$a" | awk -F'\t' '{print $2"\t"$3}' | while IFS=$'\t' read -r pn pv; do plain_out "act:$pv" "$pn"; done
+    if grep -q $'\tapplied\t' <<< "$a"; then exit 0; fi
+    if grep -q $'\theld\t' <<< "$a"; then exit 4; fi
+    if grep -q $'\tstale\t' <<< "$a"; then exit 5; fi
+    exit 1 ;;
+  --offer)
+    target="${2:?usage: check-updates.sh --offer <mcp>}"
+    [ "$#" -eq 2 ] || { log "usage: check-updates.sh --offer <mcp>   (got: $*)"; exit 2; }
+    need_launcher "$target"; rc=0; offer_one "$target" "$L" || rc=$?; exit "$rc" ;;
+  --plain)          # tests/diagnostics: --plain <class|act:verdict|cannot> <name> -> the plain-words sentence; rc 1 when the class has none
+    plain_line "${2:?usage: check-updates.sh --plain <class> <name>}" "${3:-example-mcp}" && printf '\n' ;;
   --snooze)
     s="$(all_findings)"; mkdir -p "$(dirname "$SNOOZE_FILE")"; sig "$s" > "$SNOOZE_FILE"
     log "snoozed — --check stays quiet until the set of pending findings changes."
     c="$(printf '%s\n' "$s" | grep -c '^cannot' || true)"
     [ "$c" -eq 0 ] || log "note: $c CANNOT-CHECK line(s) are never snoozed — --check keeps reporting them until the evidence can be gathered." ;;
   *)
-    printf 'usage: %s {--check | --full | --report | --apply <mcp> | --snooze}\n' "${0##*/}" >&2
+    printf 'usage: %s {--check | --full | --report | --apply <mcp> [--pin <pin>] | --offer <mcp> | --snooze | --plain <class> <name>}\n' "${0##*/}" >&2
     exit 2 ;;
 esac

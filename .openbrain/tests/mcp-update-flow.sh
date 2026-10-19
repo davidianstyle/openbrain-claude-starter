@@ -850,6 +850,9 @@ M="$T/m"; mkdir -p "$M/lib" "$M/mroot/m-mcp"
 cp "$VLIB/_mcp-decl.sh" "$M/lib/"
 printf '#!/usr/bin/env bash\n# openbrain-mcp: shape=checkout dir=m-mcp url=https://github.com/upstream/m-mcp.git\nexit 0\n' > "$M/lib/m-mcp.sh"
 git -C "$M/mroot/m-mcp" init -q -b main
+# a fetched origin/main (stand-in): without one no apply pin exists, which is its own CANNOT-CHECK (section R)
+commit "$M/mroot/m-mcp" init 2>/dev/null || git -C "$M/mroot/m-mcp" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+git -C "$M/mroot/m-mcp" update-ref refs/remotes/origin/main HEAD
 git -C "$M/mroot/m-mcp" remote add origin "https://github.com/upstream/m-mcp.git"
 git -C "$M/mroot/m-mcp" remote add fork "https://github.com/wrong/m-mcp.git"
 printf '{"mcpServers":{"m":{"type":"stdio","command":"%s/lib/m-mcp.sh","args":[]}}}\n' "$M" > "$M/claude.json"
@@ -998,8 +1001,12 @@ NFX=(MCP_LIB_DIR="$N/lib" MCP_REGISTERED_LIB="$N/lib" MCP_CLAUDE_JSON="$N/claude
 P6="$VAULT/.claude/skills/push-mcp-change/SKILL.md"
 step6="$(awk '/^6\. /{f=1} f && /^   bash /{sub(/^   /,""); print; exit}' "$P6")"
 [ -n "$step6" ] || { echo "FIXTURE BUG: no bash command found under push-mcp-change step 6" >&2; exit 90; }
+# step 6 = get the pinned offer (--offer), then run the command it printed
 OUT="$(cd "$VAULT" && env "${NFX[@]}" bash -c "${step6//<name>/nf-mcp}" 2>&1)"; RC=$?
-expect "U1a push-mcp-change step 6, run as written, builds the fork's local-build" 0 'applied' 'launcher not found'
+expect "U1a0 push-mcp-change step 6's first command is the pinned offer" 0 '^nf-mcp: offer — check-updates\.sh --apply nf-mcp --pin main=[0-9a-f]{40},built=([0-9a-f]{40}|none)$' 'launcher not found'
+u1cmd="$(printf '%s\n' "$OUT" | sed -n 's/^nf-mcp: offer — check-updates\.sh //p')"
+OUT="$(cd "$VAULT" && env "${NFX[@]}" bash .openbrain/lib/check-updates.sh $u1cmd 2>&1)"; RC=$?
+expect "U1a push-mcp-change step 6, run as written (offer, then its printed command), builds the fork's local-build" 0 'applied' 'launcher not found|unpinned'
 [ "$(git -C "$N/home" symbolic-ref -q --short HEAD)" = local-build ] && ok "U1b ...on local-build" || no "U1b not on local-build"
 awk '/^1\. /{f=1} /^2\. /{f=0} f' "$P6" | grep -q '\.fork=' && ok "U1c step 1 has you set <name>.fork= (without it the effective shape is checkout)" || no "U1c step 1 never sets .fork="
 run "${NFX[@]}"
@@ -1152,6 +1159,378 @@ fwd="$(printf '%s\n' "$revert_line" | grep -o '`git switch <branch>`' | tr -d '`
 OUT="$(env "${RVX[@]}" bash "$CU" --apply rv-mcp 2>&1)"; RC=$?
 expect "RV2 README's way forward (switch back, then --apply) rebuilds the tracked branch" 0 'rv-mcp: applied' 'not on main'
 [ "$(node "$RV/work/dist/index.js")" = v2 ] && ok "RV2b ...and the dist runs v2 again" || no "RV2b dist after going forward: $(node "$RV/work/dist/index.js" 2>&1)"
+
+echo "== P. apply pins: an ask-mode go lands exactly the offered set + detached-HEAD remedies"
+# An offer lists 2 fork/feat/* branches and two more are pushed before the go: the go must land
+# only the 2 offered, not all 4. Engine fetch is ON here (no
+# MCP_SKIP_FETCH): the race is between the report's fetch and the apply's own fetch.
+P="$T/pin"; mkdir -p "$P/lib"; cp "$VLIB/_mcp-decl.sh" "$P/lib/"
+printf '[user]\n\tname = t\n\temail = t@t\n' > "$P/gitconfig"
+git init -q -b main "$P/up"; printf '{"name":"pf","version":"0.0.0","scripts":{"build":"mkdir -p dist && cp src.js dist/index.js"}}\n' > "$P/up/package.json"
+printf 'console.log(1)\n' > "$P/up/src.js"; printf 'dist/\n' > "$P/up/.gitignore"; commit "$P/up" init
+git clone -q --bare "$P/up" "$P/origin.git"; git clone -q --bare "$P/up" "$P/fork.git"
+git clone -q "$P/origin.git" "$P/home"; git -C "$P/home" remote add fork "file://$P/fork.git"; git -C "$P/home" fetch -q fork
+git clone -q "$P/fork.git" "$P/fw"; git -C "$P/fw" remote add up "$P/origin.git"
+printf '#!/usr/bin/env bash\n# openbrain-mcp: shape=checkout dir=%s url=%s\nexit 0\n' "$P/home" "$P/origin.git" > "$P/lib/pf-mcp.sh"
+printf 'pf-mcp.fork=file://%s\n' "$P/fork.git" > "$P/cfg"
+printf '{"mcpServers":{"pf":{"type":"stdio","command":"%s/lib/pf-mcp.sh","args":[]}}}\n' "$P" > "$P/claude.json"
+PX=(MCP_LIB_DIR="$P/lib" MCP_REGISTERED_LIB="$P/lib" MCP_CLAUDE_JSON="$P/claude.json" OPENBRAIN_VAULT=/nonexistent MCP_NO_FETCH=0
+    MCP_PS_FILE="$F/ps.txt" MCP_UPDATE_STATE="$P/state" MCP_CONFIG_FILE="$P/cfg" MCP_BUILD_CMD='npm run build --silent' GIT_CONFIG_GLOBAL="$P/gitconfig")
+pfeat(){ git -C "$P/fw" fetch -q up; git -C "$P/fw" checkout -q -B "feat/$1" up/main; printf '%s\n' "$1" > "$P/fw/$1.txt"; commit "$P/fw" "feat-$1"; git -C "$P/fw" push -q -f origin "feat/$1"; }
+papply(){ OUT="$(env "${PX[@]}" bash "$CU" --apply pf-mcp "$@" 2>&1)"; RC=$?; }
+preport(){ OUT="$(env "${PX[@]}" bash "$CU" --report 2>&1)"; RC=$?; PIN="$(printf '%s\n' "$OUT" | grep -o -- '--apply pf-mcp --pin [^ ]*' | head -1 | awk '{print $4}')"
+           [ -n "$PIN" ] || { echo "FIXTURE BUG: the report offered no pinned --apply: $OUT" >&2; exit 90; }; }
+inlb(){ git -C "$P/home" merge-base --is-ancestor "$1" local-build; }
+papply; [ "$RC" = 0 ] || { echo "FIXTURE BUG: initial pf-mcp build failed: $OUT" >&2; exit 90; }
+pfeat a; pfeat b
+preport
+expect "P1 report offers every fork --apply WITH a pin listing the commits it saw" 10 'pf-mcp +source-behind +-> check-updates\.sh --apply pf-mcp --pin main=[0-9a-f]{40},feat/a=[0-9a-f]{40},feat/b=[0-9a-f]{40},built=[0-9a-f]{40} .*fork/feat/a' 'source-behind +-> check-updates\.sh --apply pf-mcp +#'
+[ "$(printf '%s\n' "$OUT" | grep -o -- '--pin [^ ]*' | sort -u | grep -c . || true)" = 1 ] && ok "P1b ...one pin per MCP (every line of the offer carries the same one)" || no "P1b pins differ across one MCP's lines"
+# the acceptance invariant: what local-build merged (base + each engine merge's 2nd parent) IS the pin's set
+lbset(){ local c out=""; c="$(git -C "$P/home" rev-parse local-build)"
+  while git -C "$P/home" log -1 --format=%s "$c" | grep -q "^Merge remote-tracking branch '"; do
+    out="$out$(git -C "$P/home" rev-parse "$c^2")"$'\n'; c="$(git -C "$P/home" rev-parse "$c^1")"; done
+  printf '%s%s\n' "$out" "$c" | grep . | LC_ALL=C sort; }
+pinset(){ printf '%s\n' "${1%,built=*}" | tr ',' '\n' | sed 's/.*=//' | LC_ALL=C sort; }   # the composition; built= names the build it replaces
+inv(){ [ "$(lbset)" = "$(pinset "$1")" ] && ok "$2" || no "$2  (local-build set: $(lbset | cut -c1-7 | tr '\n' ' ')/ pin set: $(pinset "$1" | cut -c1-7 | tr '\n' ' '))"; }
+OFFER="$PIN"
+pfeat c; pfeat d                                    # pushed after the offer, before the go
+papply --pin "$OFFER"
+expect "P2 offer of 2 feats, 2 more pushed before the go -> applied (no refusal, no re-offer)" 0 'pf-mcp: applied' 'moved|failed'
+inv "$OFFER" "P2b INVARIANT: local-build merged exactly the pin's set (base + a + b)"
+! inlb fork/feat/c && ! inlb fork/feat/d && ok "P2c ...c and d, pushed after the offer, did not land" || no "P2c a feat nobody approved landed"
+run "${PX[@]}" MCP_NO_FETCH=1
+expect "P2d ...and the next check offers them as a normal new offer" 10 $'pf-mcp\tsource-behind\t--apply pf-mcp --pin main=.*# fork/feat/c ' -
+preport; OFFER="$PIN"; papply --pin "$OFFER"
+inv "$OFFER" "P3 INVARIANT after the next offer's go (a b c d)"
+# each kind of change after the offer: the go still builds exactly what was approved
+pfeat g; preport; OFFER="$PIN"
+git -C "$P/fw" fetch -q up; git -C "$P/fw" checkout -q -B upmain up/main; printf 'm\n' > "$P/fw/m.txt"; commit "$P/fw" up-m; git -C "$P/fw" push -q up upmain:main
+papply --pin "$OFFER"; expect "P4 origin/main moved after the offer -> applied on the approved base" 0 'pf-mcp: applied' 'moved|failed'
+inv "$OFFER" "P4b INVARIANT (the newer origin/main is not in it)"
+preport; OFFER="$PIN"; git -C "$P/fw" push -q origin --delete feat/d
+papply --pin "$OFFER"; expect "P5 a feat deleted on the fork after the offer -> the approved composition still builds" 0 'pf-mcp: applied' 'failed'
+inv "$OFFER" "P5b INVARIANT (the approved feat/d is in it)"
+preport; OFFER="$PIN"; git -C "$P/fw" checkout -q feat/a; printf 'a2\n' >> "$P/fw/a.txt"; commit "$P/fw" a2; git -C "$P/fw" push -q origin feat/a
+papply --pin "$OFFER"; expect "P6 a feat's tip moved after the offer -> applied at the approved tip" 0 'pf-mcp: applied' 'failed'
+inv "$OFFER" "P6b INVARIANT (the newer feat/a tip is not in it)"
+# false-negative direction: a fetch failure never builds on cached refs
+preport; OFFER="$PIN"; lb0="$(git -C "$P/home" rev-parse local-build)"
+git -C "$P/home" remote set-url fork "file://$P/nonexistent.git"
+papply --pin "$OFFER"; git -C "$P/home" remote set-url fork "file://$P/fork.git"
+expect "P7 the engine's fetch fails -> failed, never applied on cached refs" 1 'pf-mcp: failed' 'pf-mcp: applied'
+[ "$(git -C "$P/home" rev-parse local-build)" = "$lb0" ] && ok "P7b ...local-build untouched" || no "P7b local-build changed on a failed fetch"
+# a pinned sha that is not present as an object -> loud failed naming it, nothing built (never skipped)
+GHOST=0123456789abcdef0123456789abcdef01234567
+papply --pin "${OFFER%,built=*},feat/ghost=$GHOST,built=${OFFER##*,built=}"
+expect "P7c a pinned sha missing after the fetch -> failed, naming it" 1 "the approved commit $GHOST is not in .* after the fetch" 'pf-mcp: applied'
+[ "$(git -C "$P/home" rev-parse local-build)" = "$lb0" ] && ok "P7d ...local-build untouched" || no "P7d local-build changed on a missing pinned sha"
+# held needs the engine's own verdict: a stray exit 75 is failed, never held
+printf '#!/usr/bin/env bash\nexit 75\n' > "$P/engine75"
+OUT="$(env "${PX[@]}" MCP_LOCAL_BUILD_SH="$P/engine75" bash "$CU" --apply pf-mcp --pin "$OFFER" 2>&1)"; RC=$?
+expect "P8 engine rc 75 with no verdict written -> failed, not held" 1 'pf-mcp: failed' 'pf-mcp: held'
+papply --pin "$OFFER"; expect "P8b (the real apply on that same pin went through)" 0 'pf-mcp: applied' -
+# no local-build yet + the fork moved after the offer -> the approved set, not 'failed'
+git -C "$P/home" checkout -q --detach; git -C "$P/home" branch -q -D local-build
+pfeat nb; preport; OFFER="$PIN"; pfeat nb2
+papply --pin "$OFFER"
+expect "P8c no local-build + fork moved after the offer -> applied (not failed)" 0 'pf-mcp: applied' 'failed'
+inv "$OFFER" "P8d INVARIANT on a first build (nb2 not in it)"
+# malformed / misused pins apply nothing
+lb0="$(git -C "$P/home" rev-parse local-build)"
+papply --pin xyz;               expect "P9a malformed fork pin -> usage error, nothing applied" 2 'malformed --pin' 'pf-mcp: applied'
+papply --pin;                   expect "P9b --pin with no value -> usage error" 2 'usage: check-updates\.sh --apply <mcp> \[--pin <pin>\]' 'pf-mcp: applied'
+papply --pin "";                expect "P9b2 an EMPTY --pin (an offer whose pin got lost) -> usage error, never an unpinned apply" 2 'usage: check-updates\.sh --apply <mcp> \[--pin <pin>\]' 'pf-mcp: applied'
+papply --force;                 expect "P9c an unknown extra argument -> usage error (old code silently ignored it)" 2 'usage:' 'pf-mcp: applied'
+papply --pin "$(git -C "$P/home" rev-parse HEAD)"; expect "P9d a checkout-shaped (40-hex) pin on a fork -> malformed" 2 'malformed --pin.*main=<sha>' 'pf-mcp: applied'
+[ "$(git -C "$P/home" rev-parse local-build)" = "$lb0" ] && ok "P9e ...none of them touched local-build" || no "P9e a malformed pin applied something"
+pfeat e; papply
+expect "P10 bare --apply (a direct human command) still applies whatever is live" 0 'pf-mcp: applied' -
+expect "P10a ...and says it is unpinned" 0 'pf-mcp: unpinned — applies whatever is live at apply time' -
+inlb fork/feat/e && ok "P10b ...including a feat no report showed" || no "P10b bare apply skipped a live feat"
+[ "$(lbset)" != "$(pinset "$OFFER")" ] && ok "P10c (the invariant check can fail: an unpinned build that added feat/e does not match the last pin)" || no "P10c the invariant helper cannot tell sets apart"
+# the skill's command, run from zsh exactly as the Bash tool runs it
+pfeat f; preport
+OUT="$(env "${PX[@]}" zsh -c "bash '$CU' --apply pf-mcp --pin $PIN" 2>&1)"; RC=$?
+expect "P11 the printed pinned command, run from zsh -> applied" 0 'pf-mcp: applied' 'moved|usage'
+# detached HEAD (fork): it names the sha, never 'DETACHED'
+git -C "$P/home" checkout -q --detach HEAD; run "${PX[@]}" MCP_NO_FETCH=1
+expect "F1a fork, detached HEAD -> off-branch names the detached sha" 10 $'pf-mcp\toff-branch\t.*HEAD is detached at [0-9a-f]{7}' 'DETACHED'
+git -C "$P/home" switch -q local-build
+
+# checkout shape: the go builds the offered commit, not a newer tip
+PC="$T/pinc"; mkdir -p "$PC/lib"; cp "$VLIB/_mcp-decl.sh" "$PC/lib/"
+git init -q -b main "$PC/up"; printf '{"name":"pc","version":"0.0.0","scripts":{"build":"mkdir -p dist && cp src.js dist/index.js"}}\n' > "$PC/up/package.json"
+printf 'console.log("v1")\n' > "$PC/up/src.js"; printf 'dist/\n' > "$PC/up/.gitignore"; commit "$PC/up" v1
+git clone -q --bare "$PC/up" "$PC/origin.git"; git clone -q "$PC/origin.git" "$PC/work"
+printf '#!/usr/bin/env bash\n# openbrain-mcp: shape=checkout dir=%s url=%s\nexit 0\n' "$PC/work" "$PC/origin.git" > "$PC/lib/pc-mcp.sh"
+printf '{"mcpServers":{"pc":{"type":"stdio","command":"%s/lib/pc-mcp.sh","args":[]}}}\n' "$PC" > "$PC/claude.json"; : > "$PC/cfg"
+PCX=(MCP_LIB_DIR="$PC/lib" MCP_REGISTERED_LIB="$PC/lib" MCP_CLAUDE_JSON="$PC/claude.json" OPENBRAIN_VAULT=/nonexistent MCP_NO_FETCH=0
+     MCP_PS_FILE="$F/ps.txt" MCP_UPDATE_STATE="$PC/state" MCP_CONFIG_FILE="$PC/cfg" GIT_CONFIG_GLOBAL="$P/gitconfig")
+pcpush(){ printf 'console.log("%s")\n' "$1" > "$PC/up/src.js"; commit "$PC/up" "$1"; git -C "$PC/up" push -q -f "$PC/origin.git" HEAD:main; }
+env "${PCX[@]}" bash "$CU" --apply pc-mcp >/dev/null 2>&1
+pcpush v2; v2="$(git -C "$PC/up" rev-parse HEAD)"
+OUT="$(env "${PCX[@]}" bash "$CU" --report 2>&1)"; RC=$?
+v1="$(cat "$PC/work/dist/.built-from")"
+expect "P12 checkout: the offer pins the origin/main commit it saw, and the build it was made against" 10 "pc-mcp +source-behind +-> check-updates\\.sh --apply pc-mcp --pin $v2,built=$v1 " -
+pcpush v3; v3="$(git -C "$PC/up" rev-parse HEAD)"     # lands after the offer
+OUT="$(env "${PCX[@]}" bash "$CU" --apply pc-mcp --pin "$v2,built=$v1" 2>&1)"; RC=$?
+expect "P13 checkout go after upstream moved on -> applied" 0 'pc-mcp: applied' 'moved'
+[ "$(git -C "$PC/work" rev-parse HEAD)" = "$v2" ] && [ "$(cat "$PC/work/dist/.built-from")" = "$v2" ] && [ "$(node "$PC/work/dist/index.js")" = v2 ] \
+  && ok "P13b ...built exactly the offered v2, not the newer v3" || no "P13b checkout apply built $(git -C "$PC/work" rev-parse --short HEAD), not the offered ${v2:0:7}"
+run "${PCX[@]}" MCP_NO_FETCH=1
+expect "P13c ...and v3 is offered next, with its own pin" 10 $'pc-mcp\tsource-behind\t--apply pc-mcp --pin '"$v3,built=$v2 " -
+git -C "$PC/up" checkout -q --orphan rw; printf 'console.log("rw")\n' > "$PC/up/src.js"; commit "$PC/up" rw; git -C "$PC/up" push -q -f "$PC/origin.git" rw:main
+OUT="$(env "${PCX[@]}" bash "$CU" --apply pc-mcp --pin "$v3,built=$v2" 2>&1)"; RC=$?
+expect "P14 checkout: upstream rewrote the branch after the offer -> the approved v3 is still what builds" 0 'pc-mcp: applied' 'failed'
+[ "$(node "$PC/work/dist/index.js")" = v3 ] && [ "$(cat "$PC/work/dist/.built-from")" = "$v3" ] && ok "P14b ...INVARIANT: dist/.built-from is the pin (v3)" || no "P14b checkout built $(cat "$PC/work/dist/.built-from" | cut -c1-7), not the pin"
+# detached HEAD (checkout): name the sha, no '.branch=DETACHED'; a named branch keeps the .branch= alternative
+git -C "$PC/work" checkout -q --detach HEAD; run "${PCX[@]}" MCP_NO_FETCH=1
+expect "F1b checkout, detached HEAD -> off-branch names the sha and offers no .branch= alternative" 10 $'pc-mcp\toff-branch\t.*HEAD is detached at [0-9a-f]{7}' 'DETACHED|pc-mcp\.branch='
+git -C "$PC/work" switch -q -c handwork; run "${PCX[@]}" MCP_NO_FETCH=1
+expect "F1c checkout on a named branch -> the .branch=<it> alternative is still offered" 10 $'pc-mcp\toff-branch\t.*HEAD is handwork — or, if that.s intentional, set pc-mcp\\.branch=handwork' 'detached'
+git -C "$PC/work" switch -q main
+
+# npm: the go records the offered version, never a newer publish
+PN="$T/pinn"; mkdir -p "$PN/lib"; cp "$VLIB/_mcp-decl.sh" "$PN/lib/"
+printf '#!/usr/bin/env bash\n# openbrain-mcp: shape=npm pkg=@x/z\nexit 0\n' > "$PN/lib/z-mcp.sh"
+printf '{"mcpServers":{"z":{"type":"stdio","command":"%s/lib/z-mcp.sh","args":[]}}}\n' "$PN" > "$PN/claude.json"
+cat > "$PN/npm" <<'NPM'
+#!/bin/sh
+# npm view <spec> <field>: @x/z -> latest 0.3.0; @x/z@<v> -> <v> only when published
+case "$2:$3" in
+  @x/z:version) echo 0.3.0 ;;
+  @x/z@0.2.0:version|@x/z@0.3.0:version) echo "${2#@x/z@}" ;;
+  *:version) : ;;
+esac; exit 0
+NPM
+chmod +x "$PN/npm"; mkdir -p "$PN/state"; printf '0.1.0\n' > "$PN/state/z-mcp.applied"; : > "$PN/cfg"
+PNX=(MCP_LIB_DIR="$PN/lib" MCP_REGISTERED_LIB="$PN/lib" MCP_CLAUDE_JSON="$PN/claude.json" OPENBRAIN_VAULT=/nonexistent MCP_NPM="$PN/npm"
+     MCP_PS_FILE="$F/ps.txt" MCP_UPDATE_STATE="$PN/state" MCP_CONFIG_FILE="$PN/cfg" MCP_NETWORK=1)
+run "${PNX[@]}"
+expect "P15 npm: update-available offers --apply with the version shown as its pin" 10 $'z-mcp\tupdate-available\t--apply z-mcp --pin 0.3.0,built=0.1.0 ' -
+OUT="$(env "${PNX[@]}" bash "$CU" --apply z-mcp --pin 0.2.0,built=0.1.0 2>&1)"; RC=$?
+expect "P16 npm --pin 0.2.0 while 0.3.0 is latest -> records exactly 0.2.0" 0 'z-mcp: applied — pinned 0.2.0' '0\.3\.0'
+[ "$(cat "$PN/state/z-mcp.applied")" = 0.2.0 ] && ok "P16b ...the applied state is 0.2.0" || no "P16b applied state: $(cat "$PN/state/z-mcp.applied")"
+OUT="$(env "${PNX[@]}" bash "$CU" --apply z-mcp --pin 9.9.9,built=0.2.0 2>&1)"; RC=$?
+expect "P17 npm --pin of an unpublished version -> failed, nothing recorded" 1 'z-mcp: failed — @x/z@9\.9\.9 is not a published version' 'applied'
+[ "$(cat "$PN/state/z-mcp.applied")" = 0.2.0 ] && ok "P17b ...the applied state is unchanged" || no "P17b applied state changed on a bad pin"
+
+# the skill tells Claude to run the printed pin and to treat 'moved' as a fresh offer
+BS="$VAULT/.claude/skills/brain-update-check/SKILL.md"
+tr '\n' ' ' < "$BS" | tr -s ' ' | grep -q 'Run the command exactly as printed, `--pin <pin>` included' && ok "P18a SKILL.md: run the printed command with its --pin" || no "P18a SKILL.md lacks the run-with-pin rule"
+grep -q '`held` (exit 4)' "$BS" && ! grep -qi 'moved` (exit 3)\|re-offer' "$BS" && ok "P18b SKILL.md: held handled; no moved/re-offer left" || no "P18b SKILL.md held/moved text"
+grep -q 'check-updates.sh --apply <name> --pin <pin>`' "$BS" && ok "P18c SKILL.md: the offered command carries --pin" || no "P18c SKILL.md offers a bare --apply"
+
+echo "== Q. plain-words lines (item 4): one everyday-words line after every technical finding / CANNOT-CHECK / apply outcome"
+QL="$T/qlib"; mkdir -p "$QL"; cp "$VLIB/_mcp-decl.sh" "$QL/"
+# classes the checker can emit, read from its own source: F "<name>" <class> call sites + act verdicts
+q_classes(){ { grep -ohE '\bF "[^"]*" [a-z-]+' "$1" | awk '{print $NF}'; grep -oE "act\\\\t%s\\\\t[a-z]+" "$1" | sed 's/^act.t%s.t//; s/^/act:/'; printf 'cannot\n'; } | sort -u; }
+q_missing(){ local k out; while IFS= read -r k; do out="$(bash "$1" --plain "$k" google-mcp 2>/dev/null)" || out=""; [ -n "$out" ] || printf '%s\n' "$k"; done <<< "$(q_classes "$1")"; }
+QN="$(q_classes "$CU" | grep -c . || true)"
+[ "$QN" -ge 29 ] && ok "Q1 the class scan sees $QN classes (25 finding classes + act verdicts + cannot)" || no "Q1 class scan found only $QN classes (scan broken?)"
+QM="$(q_missing "$CU")"
+[ -z "$QM" ] && ok "Q2 completeness: every class the checker can emit has a plain-words entry" || no "Q2 classes with NO plain entry: $QM"
+# red direction: remove one entry from a COPY of the live bytes -> the completeness check names it
+cp "$CU" "$QL/check-updates.sh"; grep -v '^    dist-stale) ' "$CU" > "$QL/check-updates.sh"
+[ "$(q_missing "$QL/check-updates.sh")" = dist-stale ] && ok "Q2b ...and with the dist-stale entry removed it screams, naming exactly that class" || no "Q2b removing an entry was not detected: '$(q_missing "$QL/check-updates.sh")'"
+# a class added to the checker but not to the table is caught
+{ cat "$CU"; printf '# F "x" brand-new-class\n'; } > "$QL/check-updates.sh"
+[ "$(q_missing "$QL/check-updates.sh")" = brand-new-class ] && ok "Q2c ...and a NEW class with no entry is detected" || no "Q2c new class not detected: '$(q_missing "$QL/check-updates.sh")'"
+# each plain line: non-empty, one line, <= ~110 chars, everyday words
+Qbad=""
+while IFS= read -r k; do
+  out="$(bash "$CU" --plain "$k" google-mcp)"
+  [ -n "$out" ] && [ "$(printf '%s\n' "$out" | grep -c . || true)" = 1 ] && [ "${#out}" -le 110 ] || Qbad="$Qbad $k(len ${#out})"
+  printf '%s\n' "$out" | grep -Eiq 'HEAD|dist|fork/feat|provenance|stamp|--apply|local-build|origin/' && Qbad="$Qbad $k(jargon)"
+done <<< "$(q_classes "$CU")"
+[ -z "$Qbad" ] && ok "Q3 every plain line is one line, <= 110 chars, and jargon-free" || no "Q3 bad plain lines:$Qbad"
+bash "$CU" --plain not-a-class x >/dev/null 2>&1; [ $? = 1 ] && ok "Q3b an unknown class has no entry (rc 1) — the completeness check can see it" || no "Q3b unknown class returned an entry"
+[ "$(bash "$CU" --plain source-behind google-mcp)" = "a newer version of google-mcp is available; applying rebuilds it with the new code" ] && ok "Q3c the plain line carries the server name" || no "Q3c wording/name"
+
+# report-level: a pending fork offer, a dirty tree, an off-branch HEAD, and a CANNOT-CHECK each get their pair
+pfeat q1
+OUT="$(env "${PX[@]}" bash "$CU" --report 2>&1)"; RC=$?
+q_pairs(){  # every technical line (warning sign or ?) is IMMEDIATELY followed by a plain line, and every plain line follows one
+  printf '%s\n' "$OUT" | awk '
+    index($0,"  \342\232\240 ")==1 || index($0,"  ? CANNOT-CHECK")==1 { if (want) bad++; want=1; tech++; next }
+    /^  in plain words: ./       { if (!want) stray++; want=0; plain++; next }
+    { if (want) bad++; want=0 }
+    END { if (want) bad++; printf "%d %d %d %d", tech, plain, bad+0, stray+0 }'; }
+read -r qt qp qb qs <<< "$(q_pairs)"
+[ "$RC" = 10 ] && [ "$qt" -ge 1 ] && [ "$qt" = "$qp" ] && [ "$qb" = 0 ] && [ "$qs" = 0 ] && ok "Q4 report: $qt technical line(s), each followed by exactly one plain line" || no "Q4 pairing broken: tech=$qt plain=$qp unpaired=$qb stray=$qs rc=$RC"
+printf '%s\n' "$OUT" | grep -A1 'pf-mcp  *source-behind' | grep -q 'in plain words: a newer version of pf-mcp is available' && ok "Q4b the source-behind pair reads as everyday words" || no "Q4b source-behind pair"
+echo "x" >> "$P/home/src.js"
+OUT="$(env "${PX[@]}" bash "$CU" --report 2>&1)"; RC=$?; read -r qt qp qb qs <<< "$(q_pairs)"
+printf '%s\n' "$OUT" | grep -A1 'pf-mcp  *dirty-tree' | grep -q 'in plain words: .*unsaved edits' && [ "$qt" = "$qp" ] && [ "$qb$qs" = 00 ] && ok "Q5 a setup error (dirty-tree, '!' remedy) gets its plain line too" || no "Q5 dirty-tree pair: $(printf '%s\n' "$OUT" | grep -A1 dirty-tree)"
+git -C "$P/home" checkout -q -- src.js
+git -C "$P/home" switch -q -c elsewhere
+OUT="$(env "${PX[@]}" bash "$CU" --report 2>&1)"; RC=$?; read -r qt qp qb qs <<< "$(q_pairs)"
+printf '%s\n' "$OUT" | grep -A1 'pf-mcp  *off-branch' | grep -q 'in plain words: .*different line of work' && [ "$qt" = "$qp" ] && [ "$qb$qs" = 00 ] && ok "Q5b off-branch pair" || no "Q5b off-branch pair"
+git -C "$P/home" switch -q local-build; git -C "$P/home" branch -q -D elsewhere
+# CANNOT-CHECK: an empty process list cannot be read as '0 stale'
+: > "$T/q-ps-empty.txt"
+OUT="$(env "${PX[@]}" MCP_PS_FILE="$T/q-ps-empty.txt" bash "$CU" --report 2>&1)"; RC=$?; read -r qt qp qb qs <<< "$(q_pairs)"
+printf '%s\n' "$OUT" | grep -A1 'CANNOT-CHECK  *pf-mcp' | grep -q "in plain words: couldn't check pf-mcp this time" && [ "$RC" = 20 ] && [ "$qt" = "$qp" ] && [ "$qb$qs" = 00 ] && ok "Q6 CANNOT-CHECK gets a plain line (exit 20 unchanged)" || no "Q6 cannot-check pair (rc=$RC)"
+# apply outcomes
+preport; OFFER="$PIN"; pfeat q2
+papply --pin "$OFFER"
+expect "Q7 a feat pushed after the offer -> the go applies the offer (approve-exact)" 0 'pf-mcp: applied' 'moved'
+bash "$CU" --plain act:moved x >/dev/null 2>&1 && no "Q7b a plain entry for the deleted 'moved' verdict remains" || ok "Q7b no plain entry for the deleted 'moved' verdict"
+papply
+printf '%s\n' "$OUT" | grep -A1 'pf-mcp: applied' | grep -q 'in plain words: pf-mcp was updated; restart Claude Code' && ok "Q7c applied reads in plain words" || no "Q7c no plain line after applied"
+# CLEAN is silent: no plain line anywhere on the clean path, --check prints nothing
+OUT="$(env "${PX[@]}" bash "$CU" --report 2>&1)"; RC=$?
+expect "Q8 CLEAN report: nothing new (no plain-words line)" 0 'RESULT: CLEAN' 'in plain words'
+OUT="$(env "${PX[@]}" MCP_NO_FETCH=1 bash "$CU" --check 2>&1)"; RC=$?
+[ "$RC" = 0 ] && [ -z "$OUT" ] && ok "Q8b CLEAN --check (the session-start path) prints nothing at all" || no "Q8b clean --check printed: '$OUT' (rc=$RC)"
+# findings path of --check: the summary line + ONE plain line; the plain line is last and stands alone
+pfeat q3
+env "${PX[@]}" bash "$CU" --report >/dev/null 2>&1      # fetch, so the local --check sees the new feat
+OUT="$(env "${PX[@]}" MCP_NO_FETCH=1 bash "$CU" --check 2>&1)"; RC=$?
+[ "$RC" = 10 ] && [ "$(printf '%s\n' "$OUT" | grep -c . || true)" = 2 ] && printf '%s\n' "$OUT" | head -1 | grep -Eq '^OpenBrain: MCP updates — [0-9]+ finding' \
+  && printf '%s\n' "$OUT" | tail -1 | grep -Eq '^  in plain words: .*/brain-update-check' && ok "Q9 --check on findings: the summary line + exactly one plain line (last, self-contained)" || no "Q9 --check output: $OUT (rc=$RC)"
+# the machine streams are byte-for-byte free of plain lines
+OUT="$(env "${PX[@]}" MCP_NO_FETCH=1 bash "$CU" --raw 2>&1)"; RC=$?
+expect "Q10 --raw (the parsed stream) is unchanged: no plain lines" 10 $'^mcp\tpf-mcp\tsource-behind\t' 'in plain words'
+OUT="$(env "${PX[@]}" MCP_NO_FETCH=1 bash "$CU" --auto-raw 2>&1)"; RC=$?
+expect "Q10b --auto-raw: no plain lines" 10 $'^mcp\tpf-mcp\t' 'in plain words'
+# shells: the same report under zsh and macOS /bin/bash 3.2 (the checker is a bash script; the skill runs it from a zsh Bash tool)
+OUTB="$(env "${PX[@]}" MCP_NO_FETCH=1 bash "$CU" --report 2>&1)"
+OUTZ="$(CU="$CU" zsh -c 'env "$@" bash "$CU" --report' zsh "${PX[@]}" MCP_NO_FETCH=1 2>&1)"
+OUT3="$(env "${PX[@]}" MCP_NO_FETCH=1 /bin/bash "$CU" --report 2>&1)"
+{ [ "$OUTB" = "$OUTZ" ] && [ "$OUTB" = "$OUT3" ] && printf '%s\n' "$OUTB" | grep -q 'in plain words'; } && ok "Q11 identical report (with plain lines) under bash, zsh -c and /bin/bash 3.2" || no "Q11 shell outputs differ"
+# the skill relays the plain line
+grep -q 'in plain words' "$BS" && ok "Q12 SKILL.md tells Claude to relay the plain-words lines" || no "Q12 SKILL.md does not mention the plain-words lines"
+
+echo "== R. pins: snooze ignores pins, shared checkout past the pin = held, no pin = CANNOT-CHECK, --offer new/have/drop"
+# a shared two-package monorepo checkout (packages a and b, one clone) — a monorepo layout
+R="$T/rf"; mkdir -p "$R/seed" "$R/lib"; cp "$VLIB/_mcp-decl.sh" "$R/lib/"; git -C "$R/seed" init -q -b main
+for p in a b; do mkdir -p "$R/seed/packages/$p/src"
+  printf '{"name":"%s","version":"0.0.0","scripts":{"build":"mkdir -p dist && cp src/index.js dist/index.js"}}\n' "$p" > "$R/seed/packages/$p/package.json"
+  printf 'console.log("%s v1")\n' "$p" > "$R/seed/packages/$p/src/index.js"; done
+printf 'dist/\nnode_modules/\npackage-lock.json\n' > "$R/seed/.gitignore"; commit "$R/seed" init
+git clone -q --bare "$R/seed" "$R/origin"; git clone -q "$R/origin" "$R/work"; git clone -q "$R/origin" "$R/other"
+for p in a b; do printf '#!/usr/bin/env bash\n# openbrain-mcp: shape=checkout dir=%s sub=packages/%s url=%s\nexit 0\n' "$R/work" "$p" "$R/origin" > "$R/lib/$p-mcp.sh"; done
+printf '{"mcpServers":{"a":{"type":"stdio","command":"%s/lib/a-mcp.sh","args":[]},"b":{"type":"stdio","command":"%s/lib/b-mcp.sh","args":[]}}}\n' "$R" "$R" > "$R/claude.json"; : > "$R/cfg"
+RX=(MCP_LIB_DIR="$R/lib" MCP_REGISTERED_LIB="$R/lib" MCP_CLAUDE_JSON="$R/claude.json" OPENBRAIN_VAULT=/nonexistent MCP_NO_FETCH=1
+    MCP_PS_FILE="$F/ps.txt" OPENBRAIN_UPDATE_SNOOZE="$R/snooze" MCP_UPDATE_STATE="$R/state" MCP_CONFIG_FILE="$R/cfg" GIT_CONFIG_GLOBAL="$P/gitconfig")
+rpush(){ printf 'console.log("%s")\n' "$2" > "$R/other/packages/$1/src/index.js"; commit "$R/other" "$1 $2"; git -C "$R/other" push -q origin main; git -C "$R/work" fetch -q origin; }
+env "${RX[@]}" bash "$CU" --apply a-mcp >/dev/null 2>&1; env "${RX[@]}" bash "$CU" --apply b-mcp >/dev/null 2>&1
+# A: a snoozed finding stays snoozed when only a sibling package moves upstream (the pin in its remedy changes).
+# Only a-mcp is registered here, so the sibling commit is not itself a new (b-mcp) finding.
+printf '{"mcpServers":{"a":{"type":"stdio","command":"%s/lib/a-mcp.sh","args":[]}}}\n' "$R" > "$R/claude-a.json"
+RA=("${RX[@]}" MCP_CLAUDE_JSON="$R/claude-a.json")
+rpush a "a v2"; env "${RA[@]}" bash "$CU" --snooze 2>/dev/null
+OUT="$(env "${RA[@]}" bash "$CU" --check 2>&1)"; RC=$?
+expect "R1a snoozed a-mcp source-behind -> --check silent" 0 - 'finding'
+rpush b "b v2"                                    # a sibling commit moves origin/main (fetched, as any --full does)
+OUT="$(env "${RA[@]}" bash "$CU" --raw 2>&1)"; RC=$?
+expect "R1b (the a-mcp remedy's pin did change)" 10 $'a-mcp\tsource-behind\t--apply a-mcp --pin '"$(git -C "$R/origin" rev-parse main)" -
+OUT="$(env "${RA[@]}" bash "$CU" --check 2>&1)"; RC=$?
+expect "R1c ...yet --check stays snoozed: the finding set is unchanged" 0 - 'finding'
+echo x >> "$R/work/packages/a/src/index.js"; OUT="$(env "${RA[@]}" bash "$CU" --check 2>&1)"; RC=$?
+git -C "$R/work" checkout -q -- packages/a/src/index.js
+expect "R1d false-negative direction: a NEW finding (dirty-tree) still un-snoozes" 10 'OpenBrain: MCP updates' -
+# B: HEAD of the shared checkout already PAST the pin with un-approved a-changes -> held, never built
+apin(){ env "${RX[@]}" bash "$CU" --raw 2>/dev/null | grep $'^mcp\ta-mcp\t' | grep -o -- '--pin [^ ]*' | head -1 | awk '{print $2}'; }
+rm -f "$R/snooze"; X="$(apin)"; [ -n "$X" ] || { echo "FIXTURE BUG: no pinned a-mcp offer" >&2; exit 90; }   # the offer for a-mcp (a v2)
+rpush a "a v3 UNSEEN"; rpush b "b v3"; env "${RX[@]}" bash "$CU" --apply b-mcp >/dev/null 2>&1   # b's apply ff's the shared HEAD past X
+bf="$(cat "$R/work/packages/a/dist/.built-from")"
+OUT="$(env "${RX[@]}" bash "$CU" --apply a-mcp --pin "$X" 2>&1)"; RC=$?
+expect "R2a shared HEAD past the approved commit (another server's apply) -> held (exit 4), cause named, not built" 4 "a-mcp: held — HEAD is 1 commit\(s\) past the approved .*already on origin/main: another server's apply moved this shared checkout" 'a-mcp: applied|exactly the|--pin'
+[ "$(cat "$R/work/packages/a/dist/.built-from")" = "$bf" ] && [ "$(node "$R/work/packages/a/dist/index.js")" = "a v1" ] && ok "R2b ...a's running build untouched (still a v1, never the unseen a v3)" || no "R2b a was rebuilt: $(node "$R/work/packages/a/dist/index.js")"
+X="$(apin)"; OUT="$(env "${RX[@]}" bash "$CU" --apply a-mcp --pin "$X" 2>&1)"; RC=$?
+expect "R2c ...the next report's offer applies" 0 'a-mcp: applied' 'held'
+[ "$(cat "$R/work/packages/a/dist/.built-from")" = "${X%,built=*}" ] && ok "R2c2 ...INVARIANT: dist/.built-from is the pin" || no "R2c2 built-from is not the pin"
+rpush b "b v4"; env "${RX[@]}" bash "$CU" --apply b-mcp >/dev/null 2>&1
+rpush a "a v5"; X5="$(apin)"; rpush b "b v5"; env "${RX[@]}" bash "$CU" --apply b-mcp >/dev/null 2>&1
+OUT="$(env "${RX[@]}" bash "$CU" --apply a-mcp --pin "$X5" 2>&1)"; RC=$?
+expect "R2d HEAD past the pin ONLY in a sibling package -> builds the approved a source" 0 'a-mcp: applied' 'held'
+printf '%s\n' "$OUT" | grep -q 'only outside packages/a' && ! printf '%s\n' "$OUT" | grep -q 'exactly' && ok "R2e ...and does not claim 'exactly'" || no "R2e wording: $(printf '%s\n' "$OUT" | grep -i approved)"
+[ "$(node "$R/work/packages/a/dist/index.js")" = "a v5" ] && [ "$(git -C "$R/work" rev-parse "$(cat "$R/work/packages/a/dist/.built-from"):packages/a")" = "$(git -C "$R/work" rev-parse "${X5%,built=*}:packages/a")" ] \
+  && ok "R2f ...INVARIANT: the built packages/a source is the pin's (a v5)" || no "R2f a runs $(node "$R/work/packages/a/dist/index.js")"
+# a local unpushed commit in <sub> -> held once, plain cause, no re-offer, no loop
+printf 'console.log("a LOCAL")\n' > "$R/work/packages/a/src/index.js"; commit "$R/work" "local a (unpushed)"
+XL="$(apin)"; [ "${XL%,built=*}" = "$(git -C "$R/work" rev-parse origin/main)" ] || { echo "FIXTURE BUG: a-mcp offer pin is not origin/main" >&2; exit 90; }
+mv "$R/work/packages/a/dist" "$R/work/packages/a/.dist.bak"          # (I) and a stranded build's backup on top
+OUT="$(env "${RX[@]}" bash "$CU" --apply a-mcp --pin "$XL" 2>&1)"; RC=$?; H1="$(printf '%s\n' "$OUT" | grep '^a-mcp: held')"
+expect "R2g local unpushed commit in packages/a -> held (exit 4): 'exist only on this machine', nothing built" 4 'a-mcp: held — HEAD is 1 commit\(s\) past the approved .*they exist only on this machine \(unpushed local commits\) — push or drop them.*Nothing built' 'a-mcp: applied|--pin'
+[ "$(node "$R/work/packages/a/dist/index.js")" = "a v5" ] && [ ! -e "$R/work/packages/a/.dist.bak" ] && ok "R2h ...(I) 'Nothing built' is true: only the last-good a v5 was put back" || no "R2h dist after held: $(node "$R/work/packages/a/dist/index.js" 2>&1)"
+OUT="$(env "${RX[@]}" bash "$CU" --apply a-mcp --pin "$XL" 2>&1)"; RC=$?
+[ "$RC" = 4 ] && [ "$(printf '%s\n' "$OUT" | grep '^a-mcp: held')" = "$H1" ] && ok "R2i ...a second go is held the same way (no re-offer to loop on)" || no "R2i second go: rc=$RC $(printf '%s\n' "$OUT" | grep '^a-mcp:')"
+git -C "$R/work" reset -q --hard HEAD~1
+# C: no pin computable -> CANNOT-CHECK, and never a bare --apply remedy
+pfeat "x,y"; env "${PX[@]}" bash "$CU" --report >/dev/null 2>&1
+OUT="$(env "${PX[@]}" MCP_NO_FETCH=1 bash "$CU" --raw 2>&1)"; RC=$?
+expect "R3a fork, a feat name the pin token cannot carry -> CANNOT-CHECK naming why" 20 $'cannot\tpf-mcp\tno apply pin \\(a fork/feat/\\* name outside' -
+expect "R3b ...and its source-behind offers NO bare --apply" 20 $'pf-mcp\tsource-behind\t!no pinned --apply can be offered' $'pf-mcp\t[a-z-]+\t--apply pf-mcp( |$)'
+OUT="$(env "${PX[@]}" MCP_NO_FETCH=1 bash "$CU" --report 2>&1)"; RC=$?
+expect "R3c the rendered report shows no runnable bare --apply for it" 20 'no pinned --apply can be offered' 'check-updates\.sh --apply pf-mcp +(#|$)'
+git -C "$P/fw" push -q origin --delete "feat/x,y"; env "${PX[@]}" bash "$CU" --report >/dev/null 2>&1
+git -C "$R/work" update-ref -d refs/remotes/origin/main; rm -rf "$R/work/packages/a/dist"
+OUT="$(env "${RX[@]}" bash "$CU" --raw 2>&1)"; RC=$?
+expect "R3d checkout, no origin/<branch> -> CANNOT-CHECK, no-dist offers no bare --apply" 20 $'a-mcp\tno-dist\t!no pinned --apply' $'a-mcp\tno-dist\t--apply'
+git -C "$R/work" fetch -q origin
+PNC=(MCP_LIB_DIR="$PN/lib" MCP_REGISTERED_LIB="$PN/lib" MCP_CLAUDE_JSON="$PN/claude.json" OPENBRAIN_VAULT=/nonexistent MCP_NPM=false
+     MCP_PS_FILE="$F/ps.txt" MCP_UPDATE_STATE="$R/npmstate" MCP_CONFIG_FILE="$PN/cfg" MCP_NETWORK=1)
+run "${PNC[@]}"
+expect "R3e npm, registry down + unpinned -> CANNOT-CHECK, no bare --apply" 20 $'z-mcp\tunpinned\t!no pinned --apply' $'z-mcp\tunpinned\t--apply'
+# I: the docs claim only what is true
+grep -q 'nothing touched)' "$ENGINE" && no "R5c engine header still claims 'nothing touched'" || ok "R5c engine header no longer claims 'nothing touched'"
+grep -qi 'moved\|re-offer' "$ENGINE" && grep -qi 'exit 3' "$ENGINE" && no "R5d engine still documents moved/exit 3" || ok "R5d engine: no moved/exit 3"
+# J: unpushed (hand commit on local-build) -> no stale pin; re-run for a fresh offer
+papply >/dev/null 2>&1; printf 'h\n' > "$P/home/hand.txt"; commit "$P/home" hand
+run "${PX[@]}" MCP_NO_FETCH=1
+expect "R6 unpushed remedy: re-run /brain-update-check for a fresh offer, no embedded pin" 10 $'pf-mcp\tunpushed\t!.*then re-run /brain-update-check for a fresh offer' $'pf-mcp\tunpushed\t[^#]*--pin'
+git -C "$P/home" reset -q --hard HEAD~1
+# E: --offer (push-mcp-change step 6)
+pfeat mine; pfeat theirs
+OUT="$(env "${PX[@]}" bash "$CU" --offer pf-mcp 2>&1)"; RC=$?
+expect "R7a --offer fetches and lists every feat the go would land as new" 0 'pf-mcp: new   — fork/feat/mine [0-9a-f]{7}' -
+expect "R7b ...including one the author did not push (the STOP case)" 0 'pf-mcp: new   — fork/feat/theirs [0-9a-f]{7}' -
+expect "R7c ...and already-landed ones as have, plus the pinned command" 0 'pf-mcp: have  — origin/main [0-9a-f]{7}' -
+expect "R7c2 ...the pin lists every entry it would build" 0 'pf-mcp: offer — check-updates\.sh --apply pf-mcp --pin main=[0-9a-f]{40}(,feat/[A-Za-z0-9._/-]+=[0-9a-f]{40})*,feat/theirs=[0-9a-f]{40},built=[0-9a-f]{40}$' -
+OC="$(printf '%s\n' "$OUT" | sed -n 's/^pf-mcp: offer — check-updates\.sh //p')"
+OUT="$(env "${PX[@]}" bash "$CU" $OC 2>&1)"; RC=$?
+expect "R7d the offered command applies" 0 'pf-mcp: applied' 'failed'
+inv "${OC##* }" "R7d1 INVARIANT after the --offer go"
+git -C "$P/fw" push -q origin --delete feat/theirs
+OUT="$(env "${PX[@]}" bash "$CU" --offer pf-mcp 2>&1)"; RC=$?
+expect "R7i a feat deleted on the fork -> --offer shows it as a drop line" 0 'pf-mcp: drop  — fork/feat/theirs [0-9a-f]{7} \(in local-build, gone from the fork' -
+OC="$(printf '%s\n' "$OUT" | sed -n 's/^pf-mcp: offer — check-updates\.sh //p')"; OUT="$(env "${PX[@]}" bash "$CU" $OC 2>&1)"
+! inlb "$(git -C "$P/fw" rev-parse feat/theirs)" && ok "R7j ...and the go drops it" || no "R7j dropped feat still in local-build"
+pfeat z1   # the same offer -> apply, typed from zsh (the Bash tool's shell; no word-splitting of variables)
+OUT="$(env "${PX[@]}" zsh -c "bash '$CU' --offer pf-mcp" 2>&1)"; RC=$?
+OC="$(printf '%s\n' "$OUT" | sed -n 's/^pf-mcp: offer — check-updates\.sh //p')"
+OUT="$(env "${PX[@]}" zsh -c "bash '$CU' $OC" 2>&1)"; RC=$?
+expect "R7d2 --offer then its printed command, both run from zsh -> applied" 0 'pf-mcp: applied' 'moved|usage'
+git -C "$P/home" remote set-url fork "file://$P/nonexistent.git"
+OUT="$(env "${PX[@]}" bash "$CU" --offer pf-mcp 2>&1)"; RC=$?; git -C "$P/home" remote set-url fork "file://$P/fork.git"
+expect "R7e --offer with a failing fetch -> exit 20, no offer on cached refs" 20 'pf-mcp: cannot — fork fetch failed' 'pf-mcp: offer'
+# first apply after push-mcp-change step 1 (.fork= set, remote not added yet): the offer reads the fork by URL
+EO="$T/eo"; mkdir -p "$EO/lib"; cp "$VLIB/_mcp-decl.sh" "$EO/lib/"
+git clone -q --bare "$P/up" "$EO/origin.git"; git clone -q --bare "$P/up" "$EO/fork.git"; git clone -q "$EO/origin.git" "$EO/home"
+git clone -q "$EO/fork.git" "$EO/fw"; git -C "$EO/fw" checkout -q -b feat/one; printf '1\n' > "$EO/fw/one.txt"; commit "$EO/fw" one; git -C "$EO/fw" push -q origin feat/one
+printf '#!/usr/bin/env bash\n# openbrain-mcp: shape=checkout dir=%s url=%s\nexit 0\n' "$EO/home" "$EO/origin.git" > "$EO/lib/eo-mcp.sh"
+printf 'eo-mcp.fork=file://%s\n' "$EO/fork.git" > "$EO/cfg"
+printf '{"mcpServers":{"eo":{"type":"stdio","command":"%s/lib/eo-mcp.sh","args":[]}}}\n' "$EO" > "$EO/claude.json"
+EOX=(MCP_LIB_DIR="$EO/lib" MCP_REGISTERED_LIB="$EO/lib" MCP_CLAUDE_JSON="$EO/claude.json" OPENBRAIN_VAULT=/nonexistent MCP_NO_FETCH=0
+     MCP_PS_FILE="$F/ps.txt" MCP_UPDATE_STATE="$EO/state" MCP_CONFIG_FILE="$EO/cfg" MCP_BUILD_CMD='npm run build --silent' GIT_CONFIG_GLOBAL="$P/gitconfig")
+OUT="$(env "${EOX[@]}" bash "$CU" --offer eo-mcp 2>&1)"; RC=$?
+expect "R7f setup case (no fork remote yet): offer + the feats read from the .fork= URL" 0 'eo-mcp: new   — fork/feat/one [0-9a-f]{7}' -
+OC="$(printf '%s\n' "$OUT" | sed -n 's/^eo-mcp: offer — check-updates\.sh //p')"
+OUT="$(env "${EOX[@]}" bash "$CU" $OC 2>&1)"; RC=$?
+expect "R7g ...its pin matches what the engine computes after adding the remote -> applied" 0 'eo-mcp: applied' 'moved'
+P6S="$(sed -n '/^6\. /,/^7\. /p' "$P6")"
+printf '%s\n' "$P6S" | grep -q 'check-updates.sh --offer <name>' && printf '%s\n' "$P6S" | grep -q 'STOP' \
+  && ! printf '%s\n' "$P6S" | grep -Eq '^ *bash \.openbrain/lib/check-updates\.sh --apply <name> *$' && ok "R7h push-mcp-change step 6: --offer, STOP on foreign new lines, no bare --apply command" || no "R7h step 6 text"
+# F, G, H: skill wording and the one pin validator
+grep -n '`--apply <name>`' "$BS" | grep -v -i 'bare' | grep -q . && no "R8a SKILL.md still offers a bare \`--apply <name>\`: $(grep -n '`--apply <name>`' "$BS" | grep -v -i bare)" || ok "R8a SKILL.md: every \`--apply <name>\` mention is the 'bare = never' warning"
+tr '\n' ' ' < "$BS" | tr -s ' ' | grep -q 'Run the command exactly as printed, `--pin <pin>` included' && ok "R8b SKILL.md rule (wrap-proof): run exactly as printed, --pin included" || no "R8b run-as-printed rule missing"
+tr '\n' ' ' < "$BS" | tr -s ' ' | grep -q 'never\*\* substitute a bare `--apply`' && ok "R8c SKILL.md: no pin -> relay the CANNOT-CHECK, never a bare --apply" || no "R8c no-pin rule missing"
+[ "$(grep -c '0-9a-f\]{16}\|0-9a-f\]{40}' "$CU" "$ENGINE" | awk -F: '{s+=$2} END{print s}')" = 0 ] && grep -q 'mcp_pin_valid' "$CU" && grep -q 'mcp_pin_valid' "$ENGINE" \
+  && ok "R8d one pin validator (mcp_pin_valid) — no pin regex in check-updates.sh or the engine" || no "R8d pin regexes still duplicated"
 
 echo "== W. launcher paths: first-clone branch, npm args, lifecycle scripts"
 # the first clone checks out the branch the build tracks
@@ -1360,6 +1739,235 @@ git -C "$V/root/fathom-mcp" remote set-url origin "$fu"
 printf 'root=%s\nfathom-mcp.fork=%s\n' "$V/root" "$fu" > "$V/cfg/mcp-config"
 OUT="$(env "${VX[@]}" /bin/bash "$VAULT/bootstrap/lib/validate.sh" 2>&1)"; RC=$?
 expect "V7 a .fork= equal to origin (re-parented, no fork remote) is not CANNOT-CHECK" "$RC" 'fathom-mcp not built' 'fathom-mcp fork remote not compared|fathom-mcp origin is'
+
+echo "== X. stale offers: a go on an offer made against an older build is refused; nothing built or recorded"
+# Every pin ends in ,built=<id> (the build its offer saw). Each shape gets the same story: offer A,
+# then offer B made later lands, then the go on A — which must be refused, changing nothing. The
+# scenarios take the check-updates.sh under test, so the red direction re-runs them on a copy
+# with the comparison disabled.
+xpin(){ printf '%s\n' "$1" | grep -o -- "--apply $2 --pin [^ ]*" | head -1 | awk '{print $4}'; }
+xneed(){ [ -n "$1" ] || { printf 'FIXTURE BUG: no pinned offer for %s: %s\n' "$2" "$3" >&2; exit 90; }; }
+xbug(){ printf 'FIXTURE BUG: %s\n' "$*" >&2; exit 90; }
+# fork
+xf_setup(){  # <dir> <check-updates.sh>
+  XF="$1"; mkdir -p "$XF/lib"; cp "$VLIB/_mcp-decl.sh" "$XF/lib/"
+  git init -q -b main "$XF/up"; printf '{"name":"xf","version":"0.0.0","scripts":{"build":"mkdir -p dist && cp src.js dist/index.js"}}\n' > "$XF/up/package.json"
+  printf 'console.log(1)\n' > "$XF/up/src.js"; printf 'dist/\n' > "$XF/up/.gitignore"; commit "$XF/up" init
+  git clone -q --bare "$XF/up" "$XF/origin.git"; git clone -q --bare "$XF/up" "$XF/fork.git"
+  git clone -q "$XF/origin.git" "$XF/home"; git -C "$XF/home" remote add fork "file://$XF/fork.git"; git -C "$XF/home" fetch -q fork
+  git clone -q "$XF/fork.git" "$XF/fw"; git -C "$XF/fw" remote add up "$XF/origin.git"
+  printf '#!/usr/bin/env bash\n# openbrain-mcp: shape=checkout dir=%s url=%s\nexit 0\n' "$XF/home" "$XF/origin.git" > "$XF/lib/xf-mcp.sh"
+  printf 'xf-mcp.fork=file://%s\n' "$XF/fork.git" > "$XF/cfg"
+  printf '{"mcpServers":{"xf":{"type":"stdio","command":"%s/lib/xf-mcp.sh","args":[]}}}\n' "$XF" > "$XF/claude.json"
+  XFX=(MCP_LIB_DIR="$XF/lib" MCP_REGISTERED_LIB="$XF/lib" MCP_CLAUDE_JSON="$XF/claude.json" OPENBRAIN_VAULT=/nonexistent MCP_NO_FETCH=0
+       MCP_PS_FILE="$F/ps.txt" MCP_UPDATE_STATE="$XF/state" MCP_CONFIG_FILE="$XF/cfg" MCP_BUILD_CMD='npm run build --silent' GIT_CONFIG_GLOBAL="$P/gitconfig")
+  env "${XFX[@]}" bash "$2" --apply xf-mcp >/dev/null 2>&1 || xbug "initial xf-mcp build failed"
+}
+xffeat(){ git -C "$XF/fw" fetch -q up; git -C "$XF/fw" checkout -q -B "feat/$1" up/main; printf '%s\n' "$1" > "$XF/fw/$1.txt"; commit "$XF/fw" "feat-$1"; git -C "$XF/fw" push -q -f origin "feat/$1"; }
+xfreport(){ env "${XFX[@]}" bash "$1" --report 2>&1; }
+xf_scenario(){  # <check-updates.sh> -> XO/XRC = the go on A; XKEPT=1 when the build is as offer B left it; XB = offer B
+  local cu="$1" o a lb0 bf0
+  xffeat a; o="$(xfreport "$cu")"; a="$(xpin "$o" xf-mcp)"; xneed "$a" xf-mcp "$o"
+  xffeat b; o="$(xfreport "$cu")"; XB="$(xpin "$o" xf-mcp)"; xneed "$XB" xf-mcp "$o"
+  o="$(env "${XFX[@]}" bash "$cu" --apply xf-mcp --pin "$XB" 2>&1)" || xbug "offer B did not apply: $o"
+  lb0="$(git -C "$XF/home" rev-parse local-build)"; bf0="$(cat "$XF/home/dist/.built-from")"
+  XO="$(env "${XFX[@]}" bash "$cu" --apply xf-mcp --pin "$a" 2>&1)"; XRC=$?
+  XKEPT=0
+  [ "$(git -C "$XF/home" rev-parse local-build)" = "$lb0" ] && [ "$(cat "$XF/home/dist/.built-from")" = "$bf0" ] \
+    && git -C "$XF/home" merge-base --is-ancestor fork/feat/b local-build && XKEPT=1
+}
+# checkout
+xc_setup(){  # <dir> <check-updates.sh>
+  XC="$1"; mkdir -p "$XC/lib"; cp "$VLIB/_mcp-decl.sh" "$XC/lib/"
+  git init -q -b main "$XC/up"; printf '{"name":"xc","version":"0.0.0","scripts":{"build":"mkdir -p dist && cp src.js dist/index.js"}}\n' > "$XC/up/package.json"
+  printf 'console.log("v1")\n' > "$XC/up/src.js"; printf 'dist/\n' > "$XC/up/.gitignore"; commit "$XC/up" v1
+  git clone -q --bare "$XC/up" "$XC/origin.git"; git clone -q "$XC/origin.git" "$XC/work"
+  printf '#!/usr/bin/env bash\n# openbrain-mcp: shape=checkout dir=%s url=%s\nexit 0\n' "$XC/work" "$XC/origin.git" > "$XC/lib/xc-mcp.sh"
+  printf '{"mcpServers":{"xc":{"type":"stdio","command":"%s/lib/xc-mcp.sh","args":[]}}}\n' "$XC" > "$XC/claude.json"; : > "$XC/cfg"
+  XCX=(MCP_LIB_DIR="$XC/lib" MCP_REGISTERED_LIB="$XC/lib" MCP_CLAUDE_JSON="$XC/claude.json" OPENBRAIN_VAULT=/nonexistent MCP_NO_FETCH=0
+       MCP_PS_FILE="$F/ps.txt" MCP_UPDATE_STATE="$XC/state" MCP_CONFIG_FILE="$XC/cfg" GIT_CONFIG_GLOBAL="$P/gitconfig")
+  env "${XCX[@]}" bash "$2" --apply xc-mcp >/dev/null 2>&1 || xbug "initial xc-mcp build failed"
+}
+xcpush(){ printf 'console.log("%s")\n' "$1" > "$XC/up/src.js"; commit "$XC/up" "$1"; git -C "$XC/up" push -q -f "$XC/origin.git" HEAD:main; }
+xcoffer(){ env "${XCX[@]}" bash "$1" --offer xc-mcp 2>&1; }
+xc_scenario(){
+  local cu="$1" o a bf0
+  xcpush v2; o="$(xcoffer "$cu")"; a="$(xpin "$o" xc-mcp)"; xneed "$a" xc-mcp "$o"
+  xcpush v3; o="$(xcoffer "$cu")"; XB="$(xpin "$o" xc-mcp)"; xneed "$XB" xc-mcp "$o"
+  o="$(env "${XCX[@]}" bash "$cu" --apply xc-mcp --pin "$XB" 2>&1)" || xbug "offer B did not apply: $o"
+  bf0="$(cat "$XC/work/dist/.built-from")"
+  XO="$(env "${XCX[@]}" bash "$cu" --apply xc-mcp --pin "$a" 2>&1)"; XRC=$?
+  XKEPT=0
+  [ "$(cat "$XC/work/dist/.built-from")" = "$bf0" ] && [ "$(git -C "$XC/work" rev-parse HEAD)" = "$bf0" ] && [ "$(node "$XC/work/dist/index.js")" = v3 ] && XKEPT=1
+}
+# npm (stable): the recorded version is the build
+xn_setup(){  # <dir>
+  XN="$1"; mkdir -p "$XN/lib" "$XN/state"; cp "$VLIB/_mcp-decl.sh" "$XN/lib/"
+  printf '#!/usr/bin/env bash\n# openbrain-mcp: shape=npm pkg=@x/q\nexit 0\n' > "$XN/lib/q-mcp.sh"
+  printf '{"mcpServers":{"q":{"type":"stdio","command":"%s/lib/q-mcp.sh","args":[]}}}\n' "$XN" > "$XN/claude.json"; : > "$XN/cfg"
+  cat > "$XN/npm" <<'NPM'
+#!/bin/sh
+# npm view <spec> <field>: @x/q -> $FAKE_LATEST; @x/q@<v> -> <v> when published
+case "$2:$3" in
+  @x/q:version) echo "$FAKE_LATEST" ;;
+  @x/q@0.1.0:version|@x/q@0.2.0:version|@x/q@0.3.0:version) echo "${2#@x/q@}" ;;
+  *:version) : ;;
+esac; exit 0
+NPM
+  chmod +x "$XN/npm"; printf '0.1.0\n' > "$XN/state/q-mcp.applied"
+  XNX=(MCP_LIB_DIR="$XN/lib" MCP_REGISTERED_LIB="$XN/lib" MCP_CLAUDE_JSON="$XN/claude.json" OPENBRAIN_VAULT=/nonexistent MCP_NPM="$XN/npm"
+       MCP_PS_FILE="$F/ps.txt" MCP_UPDATE_STATE="$XN/state" MCP_CONFIG_FILE="$XN/cfg")
+}
+xnoffer(){ env "${XNX[@]}" FAKE_LATEST="$2" bash "$1" --offer q-mcp 2>&1; }
+xn_scenario(){
+  local cu="$1" o a
+  o="$(xnoffer "$cu" 0.2.0)"; a="$(xpin "$o" q-mcp)"; xneed "$a" q-mcp "$o"
+  o="$(xnoffer "$cu" 0.3.0)"; XB="$(xpin "$o" q-mcp)"; xneed "$XB" q-mcp "$o"
+  o="$(env "${XNX[@]}" FAKE_LATEST=0.3.0 bash "$cu" --apply q-mcp --pin "$XB" 2>&1)" || xbug "offer B did not apply: $o"
+  XO="$(env "${XNX[@]}" FAKE_LATEST=0.3.0 bash "$cu" --apply q-mcp --pin "$a" 2>&1)"; XRC=$?
+  XKEPT=0; [ "$(cat "$XN/state/q-mcp.applied")" = 0.3.0 ] && XKEPT=1
+}
+
+STALE_RE='stale — the offer was made against (build|version) [^ ]+, but the (current build|recorded version) is [^ ]+ .*Nothing (built|recorded); re-run /brain-update-check \(or --offer '
+STALE_PLAIN='in plain words: [a-z-]+ was left alone: the offer you approved is out of date'
+xf_setup "$T/xf" "$CU"; xf_scenario "$CU"; OUT="$XO"; RC="$XRC"
+expect "X1 fork: go on offer A after offer B (with a newer feat) landed -> stale (exit 5), nothing built" 5 "xf-mcp: $STALE_RE"'xf-mcp\)' 'xf-mcp: (applied|held|failed)'
+expect "X1b ...followed by its plain-words line" 5 "$STALE_PLAIN" -
+[ "$XKEPT" = 1 ] && ok "X1c ...local-build, dist/.built-from and feat/b are exactly as offer B left them" || no "X1c the stale go changed the fork build"
+grep -q $'\txf-mcp\texplicit\tstale\t' "$XF/state/applied.log" && ok "X1d ...and the refusal is logged as stale" || no "X1d no stale line in applied.log"
+lb0="$(git -C "$XF/home" rev-parse local-build)"
+OUT="$(env "${XFX[@]}" bash "$CU" --apply xf-mcp --pin "${XB%,built=*}" 2>&1)"; RC=$?
+expect "X2 fork: a pin with no built= entry -> stale (exit 5), re-run named, nothing applied" 5 'xf-mcp: stale — this pin has no built= entry.*Nothing applied; re-run /brain-update-check \(or --offer xf-mcp\)' 'xf-mcp: (applied|failed)|malformed'
+expect "X2b ...followed by its plain-words line" 5 "$STALE_PLAIN" -
+[ "$(git -C "$XF/home" rev-parse local-build)" = "$lb0" ] && ok "X2c ...local-build untouched" || no "X2c a pin with no built= changed local-build"
+xffeat c; o="$(xfreport "$CU")"; X="$(xpin "$o" xf-mcp)"; xneed "$X" xf-mcp "$o"
+OUT="$(env "${XFX[@]}" bash "$CU" --apply xf-mcp --pin "$X" 2>&1)"; RC=$?
+expect "X3 fork: a fresh offer still applies" 0 'xf-mcp: applied' 'stale'
+git -C "$XF/home" merge-base --is-ancestor fork/feat/c local-build && [ "$(cat "$XF/home/dist/.built-from")" = "$(git -C "$XF/home" rev-parse local-build)" ] \
+  && ok "X3b ...local-build carries feat/c and dist/ is stamped with it" || no "X3b fresh fork apply did not land"
+# the documented revert recipe (fork): check out an older build by hand, build, restamp
+xffeat d; o="$(xfreport "$CU")"; XPRE="$(xpin "$o" xf-mcp)"; xneed "$XPRE" xf-mcp "$o"   # an offer from before the revert
+old="$(git -C "$XF/home" rev-parse local-build~1)"
+git -C "$XF/home" checkout -q --detach "$old" && ( cd "$XF/home" && npm run build --silent >/dev/null ) && git -C "$XF/home" rev-parse HEAD > "$XF/home/dist/.built-from" || xbug "fork revert recipe failed"
+OUT="$(env "${XFX[@]}" bash "$CU" --apply xf-mcp --pin "$XPRE" 2>&1)"; RC=$?
+expect "X4 fork: after a manual revert, an offer from before it -> stale (it was made against the build the revert replaced)" 5 "xf-mcp: $STALE_RE"'xf-mcp\)' 'xf-mcp: applied'
+[ "$(cat "$XF/home/dist/.built-from")" = "$old" ] && ok "X4b ...the reverted build stays in place" || no "X4b the stale go replaced the reverted build"
+o="$(xfreport "$CU")"; X="$(xpin "$o" xf-mcp)"
+if [ -z "$X" ]; then no "X5 no offer after the revert (the go at X4 must have applied)"; else
+printf '%s\n' "$o" | grep -q 'xf-mcp  *off-branch' && [ "${X##*,built=}" = "$old" ] && ok "X5 fork: the fresh report after the revert says off-branch and its pin names the reverted build" || no "X5 report after revert: $(printf '%s\n' "$o" | grep xf-mcp)"
+git -C "$XF/home" switch -q local-build
+OUT="$(env "${XFX[@]}" bash "$CU" --apply xf-mcp --pin "$X" 2>&1)"; RC=$?
+expect "X5b ...switch back to local-build, run its offer -> applies forward" 0 'xf-mcp: applied' 'stale'
+git -C "$XF/home" merge-base --is-ancestor fork/feat/d local-build && [ "$(cat "$XF/home/dist/.built-from")" = "$(git -C "$XF/home" rev-parse local-build)" ] \
+  && ok "X5c ...dist/ is stamped with the new local-build, which carries feat/d" || no "X5c forward apply after revert did not land"
+fi
+
+xc_setup "$T/xc" "$CU"; xc_scenario "$CU"; OUT="$XO"; RC="$XRC"
+expect "X6 checkout: go on offer A (v2) after offer B (v3) landed -> stale (exit 5), nothing built" 5 "xc-mcp: $STALE_RE"'xc-mcp\)' 'xc-mcp: (applied|held|failed)'
+expect "X6b ...followed by its plain-words line" 5 "$STALE_PLAIN" -
+[ "$XKEPT" = 1 ] && ok "X6c ...HEAD, dist/.built-from and the running build are still v3" || no "X6c the stale go changed the checkout build"
+v3="$(git -C "$XC/work" rev-parse HEAD)"
+OUT="$(env "${XCX[@]}" bash "$CU" --apply xc-mcp --pin "${XB%,built=*}" 2>&1)"; RC=$?
+expect "X7 checkout: a bare-sha pin (no built=) -> stale (exit 5), nothing applied" 5 'xc-mcp: stale — this pin has no built= entry' 'xc-mcp: (applied|failed|held)|malformed'
+[ "$(cat "$XC/work/dist/.built-from")" = "$v3" ] && ok "X7b ...dist/.built-from untouched" || no "X7b bare-sha pin changed the build"
+xcpush v4; o="$(xcoffer "$CU")"; XPRE="$(xpin "$o" xc-mcp)"; xneed "$XPRE" xc-mcp "$o"
+v1="$(git -C "$XC/work" rev-list --max-parents=0 HEAD)"
+git -C "$XC/work" checkout -q "$v1" && ( cd "$XC/work" && npm run build --silent >/dev/null ) && git -C "$XC/work" rev-parse HEAD > "$XC/work/dist/.built-from" || xbug "checkout revert recipe failed"
+OUT="$(env "${XCX[@]}" bash "$CU" --apply xc-mcp --pin "$XPRE" 2>&1)"; RC=$?
+expect "X8 checkout: after a manual revert, an offer from before it -> stale" 5 "xc-mcp: $STALE_RE"'xc-mcp\)' 'xc-mcp: applied'
+[ "$(node "$XC/work/dist/index.js")" = v1 ] && ok "X8b ...the reverted v1 build stays in place" || no "X8b reverted build replaced"
+git -C "$XC/work" switch -q main
+o="$(xcoffer "$CU")"; X="$(xpin "$o" xc-mcp)"; xneed "$X" xc-mcp "$o"
+[ "${X##*,built=}" = "$v1" ] && ok "X8c the fresh offer after the revert names the reverted build" || no "X8c fresh offer pin $X"
+OUT="$(env "${XCX[@]}" bash "$CU" --apply xc-mcp --pin "$X" 2>&1)"; RC=$?
+expect "X8d ...and applies forward" 0 'xc-mcp: applied' 'stale'
+[ "$(node "$XC/work/dist/index.js")" = v4 ] && [ "$(cat "$XC/work/dist/.built-from")" = "$(git -C "$XC/work" rev-parse origin/main)" ] && ok "X8e ...to v4, stamped" || no "X8e forward apply after revert: $(node "$XC/work/dist/index.js")"
+
+xn_setup "$T/xn"; xn_scenario "$CU"; OUT="$XO"; RC="$XRC"
+expect "X9 npm: go on offer A (0.2.0) after offer B (0.3.0) was recorded -> stale (exit 5), nothing recorded" 5 "q-mcp: $STALE_RE"'q-mcp\)' 'q-mcp: (applied|failed)'
+expect "X9b ...followed by its plain-words line" 5 "$STALE_PLAIN" -
+[ "$XKEPT" = 1 ] && ok "X9c ...the recorded version is still 0.3.0 (no downgrade)" || no "X9c recorded: $(cat "$XN/state/q-mcp.applied")"
+[ ! -e "$XN/state/q-mcp.applied.openbrain-build.lock" ] && ok "X9d ...and the .applied lock is released" || no "X9d .applied lock left behind"
+OUT="$(env "${XNX[@]}" FAKE_LATEST=0.3.0 bash "$CU" --apply q-mcp --pin 0.2.0 2>&1)"; RC=$?
+expect "X10 npm: a bare-version pin (no built=) -> stale (exit 5), nothing recorded" 5 'q-mcp: stale — this pin has no built= entry' 'q-mcp: (applied|failed)|malformed'
+[ "$(cat "$XN/state/q-mcp.applied")" = 0.3.0 ] && ok "X10b ...recorded version unchanged" || no "X10b recorded: $(cat "$XN/state/q-mcp.applied")"
+# the npm revert recipe from the SKILL: write the older version into <name>.applied; the launcher pins to it
+NREV="$(grep -o 'printf .%s\\n. <version> > ~/.config/openbrain/mcp-updates/<name>\.applied' "$BS" | head -1)"
+[ -n "$NREV" ] && ok "X11 SKILL.md carries the npm revert recipe" || no "X11 SKILL.md lacks the npm revert recipe"
+printf '%s\n' 0.1.0 > "$XN/state/q-mcp.applied"
+( export MCP_UPDATE_STATE="$XN/state" MCP_CONFIG_FILE="$XN/cfg"; . "$VLIB/_mcp-decl.sh"; [ "$(mcp_npm_spec "$XN/lib/q-mcp.sh")" = "@x/q@0.1.0" ] ) \
+  && ok "X11b ...after it, the launcher's npx spec is the reverted version" || no "X11b npx spec after revert"
+o="$(xnoffer "$CU" 0.3.0)"; X="$(xpin "$o" q-mcp)"; xneed "$X" q-mcp "$o"
+OUT="$(env "${XNX[@]}" FAKE_LATEST=0.3.0 bash "$CU" --apply q-mcp --pin "$X" 2>&1)"; RC=$?
+expect "X11c ...and a fresh offer applies forward (0.1.0 -> 0.3.0)" 0 'q-mcp: applied — pinned 0\.3\.0 \(was 0\.1\.0\)' 'stale'
+o="$(env "${XNX[@]}" FAKE_LATEST=0.3.0 MCP_NETWORK=1 bash "$CU" --raw 2>&1)"
+printf '%s\n' "$o" | grep -q $'^mcp\tq-mcp\t' && no "X11d npm still has findings after the forward apply" || ok "X11d npm: nothing pending after the forward apply"
+# unpinned (auto, or a direct human command) is not checked: it applies whatever is live
+printf 'q-mcp.update=auto\n' > "$XN/cfg"; printf '%s\n' 0.1.0 > "$XN/state/q-mcp.applied"
+OUT="$(env "${XNX[@]}" FAKE_LATEST=0.3.0 MCP_NETWORK=1 bash "$CU" --auto-raw 2>&1)"; RC=$?
+expect "X12 auto (unpinned) is unaffected: it records the latest" 0 $'act\tq-mcp\tapplied\tpinned 0.3.0' $'act\tq-mcp\tstale'
+: > "$XN/cfg"
+# an unreadable or unwritable .applied is never read as "none" and never reported as recorded
+xnlockfree(){ [ ! -e "$XN/state/q-mcp.applied.openbrain-build.lock" ]; }
+chmod 000 "$XN/state/q-mcp.applied"
+OUT="$(env "${XNX[@]}" FAKE_LATEST=0.3.0 MCP_NETWORK=1 bash "$CU" --raw 2>&1)"; RC=$?
+expect "X16 npm: unreadable .applied -> CANNOT-CHECK, no --apply offered" 20 $'cannot\tq-mcp\t.*q-mcp\\.applied cannot be read' $'q-mcp\t[a-z-]+\t--apply|built=none'
+OUT="$(xnoffer "$CU" 0.3.0)"; RC=$?
+expect "X16b ...--offer exits 20, no offer" 20 'q-mcp: cannot — .*q-mcp\.applied cannot be read' 'q-mcp: offer|built=none'
+OUT="$(env "${XNX[@]}" FAKE_LATEST=0.3.0 bash "$CU" --apply q-mcp --pin 0.2.0,built=none 2>&1)"; RC=$?
+expect "X16c ...a go (even one claiming built=none) is refused: failed, nothing recorded" 1 'q-mcp: failed — .*q-mcp\.applied cannot be read.*nothing recorded' 'q-mcp: (applied|stale)'
+expect "X16d ...with its plain-words line" 1 'in plain words: the update of q-mcp did not finish' -
+chmod 644 "$XN/state/q-mcp.applied"
+[ "$(cat "$XN/state/q-mcp.applied")" = 0.3.0 ] && xnlockfree && ok "X16e ...recorded version unchanged, .applied lock released" || no "X16e recorded $(cat "$XN/state/q-mcp.applied"), lock $(xnlockfree && echo free || echo HELD)"
+chmod 444 "$XN/state/q-mcp.applied"
+OUT="$(env "${XNX[@]}" FAKE_LATEST=0.3.0 bash "$CU" --apply q-mcp --pin 0.2.0,built=0.3.0 2>&1)"; RC=$?
+expect "X17 npm: unwritable .applied -> failed (exit 1), never 'applied'" 1 'q-mcp: failed — could not write .*q-mcp\.applied — nothing recorded' 'q-mcp: applied'
+expect "X17b ...with its plain-words line" 1 'in plain words: the update of q-mcp did not finish' -
+chmod 644 "$XN/state/q-mcp.applied"
+[ "$(cat "$XN/state/q-mcp.applied")" = 0.3.0 ] && xnlockfree && ok "X17c ...recorded version unchanged, .applied lock released" || no "X17c recorded $(cat "$XN/state/q-mcp.applied"), lock $(xnlockfree && echo free || echo HELD)"
+grep -q $'\tq-mcp\texplicit\tfailed\tcannot write q-mcp.applied' "$XN/state/applied.log" && ok "X17d ...and the failed write is logged" || no "X17d failed write not logged"
+# red direction: swallow the read error and the write error in a COPY; the same fixtures must then lie
+XBR2="$T/xbroken2"; mkdir -p "$XBR2"; cp "$CU" "$ENGINE" "$VLIB/_mcp-decl.sh" "$XBR2/"
+sedi 's/^  cat "\$f" || return 1$/  cat "$f" 2>\/dev\/null || true/' "$XBR2/_mcp-decl.sh"
+sedi 's/^  if ! printf .%s\\n. "\$latest" > "\$STATE\/\$name\.applied"; then$/  if ! { printf "%s\\n" "$latest" > "$STATE\/$name.applied" || true; }; then/' "$XBR2/check-updates.sh"
+sed_verify "$XBR2/_mcp-decl.sh" '  cat "$f" 2>/dev/null || true' "X18 decl sed"; sed_verify "$XBR2/check-updates.sh" '|| true; }; then' "X18 checker sed"
+XNKEEP="$XN"; XNXKEEP=("${XNX[@]}"); xn_setup "$T/xnr"
+chmod 000 "$XN/state/q-mcp.applied"
+OUT="$(env "${XNX[@]}" FAKE_LATEST=0.3.0 MCP_NETWORK=1 bash "$XBR2/check-updates.sh" --raw 2>&1)"
+printf '%s\n' "$OUT" | grep -q -- '--pin 0.3.0,built=none' && ok "X18a red: read error swallowed -> the report offers built=none for a recorded version it could not read" || no "X18a red direction: $(printf '%s\n' "$OUT" | grep q-mcp)"
+OUT="$(env "${XNX[@]}" FAKE_LATEST=0.3.0 bash "$XBR2/check-updates.sh" --apply q-mcp --pin 0.2.0,built=none 2>&1)"; RC=$?
+chmod 644 "$XN/state/q-mcp.applied"
+[ "$RC" = 0 ] && printf '%s\n' "$OUT" | grep -q 'q-mcp: applied' && [ "$(cat "$XN/state/q-mcp.applied")" = 0.1.0 ] \
+  && ok "X18b red: both swallowed -> a go passes the guard and reports 'applied' while nothing was recorded (what X16c/X17 refuse)" || no "X18b red direction: rc=$RC $(printf '%s\n' "$OUT" | grep '^q-mcp:') recorded=$(cat "$XN/state/q-mcp.applied")"
+XN="$XNKEEP"; XNX=("${XNXKEEP[@]}")
+# the plain-words table names the new verdict
+[ "$(bash "$CU" --plain act:stale google-mcp)" = "google-mcp was left alone: the offer you approved is out of date; get a fresh one and approve that" ] \
+  && ok "X13 act:stale has its plain-words entry" || no "X13 act:stale plain entry"
+# an unreadable build stamp: no offer can name the build it replaces, and a go builds nothing
+v4="$(git -C "$XC/work" rev-parse HEAD)"; chmod 000 "$XC/work/dist/.built-from"
+OUT="$(xcoffer "$CU")"; RC=$?
+expect "X15 an unreadable build stamp -> --offer exits 20, no offer" 20 'xc-mcp: cannot — .*\.built-from cannot be read' 'xc-mcp: offer'
+OUT="$(env "${XCX[@]}" MCP_NO_FETCH=1 bash "$CU" --raw 2>&1)"; RC=$?
+expect "X15b ...the report says CANNOT-CHECK and offers no --apply" 20 $'cannot\txc-mcp\t.*\\.built-from cannot be read' $'xc-mcp\t[a-z-]+\t--apply'
+OUT="$(env "${XCX[@]}" bash "$CU" --apply xc-mcp --pin "$v4,built=$v4" 2>&1)"; RC=$?
+expect "X15c ...and a go fails naming the stamp, nothing built" 1 "cannot read the current build.s stamp" 'xc-mcp: applied'
+chmod 644 "$XC/work/dist/.built-from"
+[ "$(cat "$XC/work/dist/.built-from")" = "$v4" ] && ok "X15d ...the stamp is unchanged" || no "X15d stamp changed"
+
+# red direction: disable the comparison in a COPY of the live bytes; the same scenarios must then fail
+XBR="$T/xbroken"; mkdir -p "$XBR"; cp "$CU" "$ENGINE" "$VLIB/_mcp-decl.sh" "$XBR/"
+sedi 's/^  if \[ "\$want" != "\$cur" \]; then$/  if false; then/' "$XBR/mcp-local-build.sh"
+sedi 's/^  if \[ -n "\$want" \] && \[ "\$want" != "\${prev:-none}" \]; then$/  if false; then/' "$XBR/check-updates.sh"
+{ grep -qF '[ "$want" != "$cur" ]' "$XBR/mcp-local-build.sh" || grep -qF '[ "$want" != "${prev:-none}" ]' "$XBR/check-updates.sh"; } && xbug "red-direction sed left a guard in place"
+sed_verify "$XBR/mcp-local-build.sh" '  if false; then' "X14 engine sed"; sed_verify "$XBR/check-updates.sh" '  if false; then' "X14 checker sed"
+xf_setup "$T/xfb" "$XBR/check-updates.sh"; xf_scenario "$XBR/check-updates.sh"
+[ "$XRC" = 0 ] && [ "$XKEPT" = 0 ] && { ! git -C "$XF/home" merge-base --is-ancestor fork/feat/b local-build; } \
+  && ok "X14a red: fork guard disabled -> the go on A applies and silently drops feat/b (what X1 refuses)" || no "X14a red direction did not reproduce the fork defect (rc=$XRC kept=$XKEPT)"
+xc_setup "$T/xcb" "$XBR/check-updates.sh"; xc_scenario "$XBR/check-updates.sh"
+[ "$XRC" = 4 ] && printf '%s\n' "$XO" | grep -q '^xc-mcp: held' && [ "$XKEPT" = 1 ] \
+  && ok "X14b red: checkout guard disabled -> the go on A falls to the held backstop (exit 4, nothing built); X6's stale verdict is the guard's" || no "X14b red direction: rc=$XRC kept=$XKEPT $(printf '%s\n' "$XO" | grep '^xc-mcp:')"
+xn_setup "$T/xnb"; xn_scenario "$XBR/check-updates.sh"
+[ "$XRC" = 0 ] && [ "$(cat "$XN/state/q-mcp.applied")" = 0.2.0 ] && ok "X14c red: npm guard disabled -> the go on A downgrades 0.3.0 to 0.2.0 (what X9 refuses)" || no "X14c red direction did not reproduce the npm downgrade (rc=$XRC, $(cat "$XN/state/q-mcp.applied"))"
 
 echo; printf 'TOTAL: %s passed, %s failed, %s skipped\n' "$pass" "$fail" "$skipped"
 [ "$fail" -eq 0 ]

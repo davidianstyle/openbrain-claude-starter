@@ -132,13 +132,13 @@ else
 fi
 
 # MCP update check — offline (--check makes no network calls), one summary
-# line, never blocks. Same explicit-rc pattern as above: 0 clean (silent),
+# line plus its plain-words companion, never blocks. Same explicit-rc pattern as above: 0 clean (silent),
 # 10 findings, 20 cannot-check, anything else is a checker failure.
 if [[ -f "$VAULT/.openbrain/lib/check-updates.sh" ]]; then
   mcp_rc=0
   mcp_out="$(bash "$VAULT/.openbrain/lib/check-updates.sh" --check 2>&1)" || mcp_rc=$?
   if (( mcp_rc == 10 || mcp_rc == 20 )); then
-    printf '%s\n' "$mcp_out" | tail -1
+    printf '%s\n' "$mcp_out" | tail -2   # the summary line + its one plain-words line (nothing on CLEAN)
   elif (( mcp_rc != 0 )); then
     warn "MCP update check FAILED (exit $mcp_rc) — run manually: bash .openbrain/lib/check-updates.sh --check"
   fi

@@ -56,15 +56,37 @@
 #     (mcp_fork_unsupported), never a silent build of something else.
 #   * A feature branch already merged upstream merges as a no-op (harmless);
 #     if `gh` is available we additionally REPORT merged PRs as drop candidates.
+#   * MCP_APPLY_PIN=<pin> (set by check-updates.sh --apply <mcp> --pin <pin>): build
+#     EXACTLY the approved composition, never whatever is live at apply time.
+#       fork:     <pin> = main=<sha>[,feat/<name>=<sha>]... — local-build is rebuilt from
+#                 that base + those tips, merged by sha. A feat pushed after the offer is
+#                 simply not in it (the next check offers it); one in the old local-build
+#                 but not in the pin is dropped. A pinned sha not present after the fetch
+#                 is a loud failure naming it — never skipped.
+#       checkout: <pin> = the approved <origin>/<branch> commit. The engine fast-forwards to
+#                 it. If HEAD is then still PAST it with commits touching <sub> (local
+#                 unpushed commits, or another server's apply moved a shared checkout) it
+#                 builds nothing and EXITS 75 (held), writing the reason to $MCP_APPLY_VERDICT.
+#     Every pin ends in ,built=<sha|none>: the build its offer was made against. Under the
+#     lock, before anything touches the checkout, a pin whose built= is not the current build
+#     (mcp_built_id) is STALE: nothing is built and the engine EXITS 76, writing why to
+#     $MCP_APPLY_VERDICT. Every engine run writes dist/.built-from only under this lock, so the
+#     build the check saw is the build this run replaces (a hand revert is a human step, run
+#     while no apply is).
+#     Unset/empty = unpinned (whatever is live — a direct human command, auto, or a launch).
 #
 # Env overrides (also used by the scratch test):
 #   MCP_FORK_REMOTE (default: fork)   MCP_BASE_REMOTE (default: origin)
 #   MCP_BASE_REF (default: <base-remote>/main)   MCP_BUILD_CMD (default: install_deps . && npm run build && npm run test --if-present)
 #   MCP_DECL_SH (default: _mcp-decl.sh beside this script)   MCP_SKIP_FETCH (default: 0)
+#   MCP_APPLY_PIN (default: unset — unpinned)   MCP_APPLY_VERDICT (file for the held reason)
+# Exit: 0 built · 1 refused/failed (last-good dist kept) · 75 held (pinned checkout: nothing built)
+#       · 76 stale (the pin's built= is not the current build: nothing built)
 #
 # NB (macOS): bash shebang (zsh won't word-split); `grep -vc` not `grep -qv`.
 set -euo pipefail
 
+PIN="${MCP_APPLY_PIN:-}"
 ARG1="${1:?usage: mcp-local-build.sh <launcher-path>  OR  mcp-local-build.sh --checkout <mcp-name> <dir> <sub> <branch> [entry]}"
 FORK_REMOTE="${MCP_FORK_REMOTE:-fork}"
 BASE_REMOTE="${MCP_BASE_REMOTE:-origin}"
@@ -111,13 +133,33 @@ install_deps(){
   mkdir -p "$root/node_modules" && printf '%s\n' "$hash" > "$mark"
 }
 
-# after_lock <pkgdir> : the steps that must follow taking the lock, in order.
+# after_lock <pkgdir> <pin-kind> : the steps that must follow taking the lock, in order. The
+# stale-offer check runs after the recovery (the restored dist/ is the current build) and before
+# any refusal or checkout change, so a refused go leaves everything as it was.
 after_lock(){
   recover_stranded_dist "$1"
   if [ -n "${MCP_BUILD_ONLY_IF_MISSING:-}" ] && [ -f "$MCP_BUILD_ONLY_IF_MISSING" ]; then
     log "$MCP_BUILD_ONLY_IF_MISSING already exists (a concurrent run built it first) — nothing to do"
     exit 0
   fi
+  refuse_stale_pin "$1" "$2"
+}
+
+# refuse_stale_pin <pkgdir> <pin-kind> : validate the pin, exit 76 when its built= is not the
+# build dist/ holds now, else reduce PIN to the composition the rest of the run builds.
+refuse_stale_pin(){
+  local want cur msg
+  [ -n "$PIN" ] || return 0
+  mcp_pin_valid "$2" "$PIN" || die "$NAME: malformed pin '$PIN' — expected $(mcp_pin_form "$2")"
+  want="$(mcp_pin_built "$PIN")"
+  cur="$(mcp_built_id "$1")" || die "$NAME: cannot read the current build's stamp under $1, so the offer cannot be checked against it — nothing built"
+  if [ "$want" != "$cur" ]; then
+    msg="the offer was made against build ${want:0:7}, but the current build is ${cur:0:7} (an apply or build ran after the offer) — applying it could move the build backward. Nothing built; re-run /brain-update-check (or --offer $NAME) for a fresh offer."
+    log "stale: $msg"
+    [ -z "${MCP_APPLY_VERDICT:-}" ] || printf '%s\n' "$msg" > "$MCP_APPLY_VERDICT"
+    exit 76
+  fi
+  PIN="$(mcp_pin_target "$PIN")"
 }
 
 # start_marker : the build's start time, inside the lock dir this run holds, backdated
@@ -204,14 +246,35 @@ if [ "$ARG1" = "--checkout" ]; then
   PKG="$CDIR"; [ "$SUB" = . ] || PKG="$CDIR/$SUB"
   [ -d "$CDIR/.git" ] || die "$CDIR is not a git repo"
   take_lock "$CDIR"
-  after_lock "$PKG"
+  after_lock "$PKG" checkout
   [ "$(git -C "$CDIR" symbolic-ref -q --short HEAD || true)" = "$BRANCH" ] \
     || die "$NAME: $CDIR is not on $BRANCH — refusing (the build tracks $BRANCH)"
   [ -z "$(git -C "$CDIR" status --porcelain -- "$SUB")" ] \
     || die "$NAME has uncommitted changes in $SUB — commit or stash them first (refusing to rebuild over dirty work)"
   if [ "${MCP_SKIP_FETCH:-0}" != "1" ]; then log "fetching $BASE_REMOTE ..."; git -C "$CDIR" fetch --quiet "$BASE_REMOTE"; fi
-  git -C "$CDIR" merge --ff-only --quiet "$BASE_REMOTE/$BRANCH" \
-    || die "$NAME: $BRANCH cannot fast-forward to $BASE_REMOTE/$BRANCH (local commits?) — resolve by hand"
+  TARGET="$BASE_REMOTE/$BRANCH"
+  if [ -n "$PIN" ]; then
+    git -C "$CDIR" cat-file -e "$PIN^{commit}" 2>/dev/null || die "$NAME: the approved commit $PIN is not in $CDIR after the fetch — nothing built"
+    TARGET="$PIN"
+  fi
+  git -C "$CDIR" merge --ff-only --quiet "$TARGET" \
+    || die "$NAME: $BRANCH cannot fast-forward to $TARGET (local commits?) — resolve by hand"
+  # ff to an ancestor of HEAD is a no-op: HEAD may still be PAST the approved commit. Building
+  # it would ship commits nobody approved for this server, so that is held, not built.
+  if [ -n "$PIN" ] && [ "$(git -C "$CDIR" rev-parse HEAD)" != "$PIN" ]; then
+    past="$(git -C "$CDIR" rev-list "$PIN..HEAD" -- "$SUB")" || die "$NAME: cannot list the commits between the approved ${PIN:0:7} and HEAD"
+    if [ -n "$past" ]; then
+      local_only="$(git -C "$CDIR" rev-list "$PIN..HEAD" --not "$BASE_REMOTE/$BRANCH" -- "$SUB")" || die "$NAME: cannot compare HEAD with $BASE_REMOTE/$BRANCH"
+      n="$(printf '%s\n' "$past" | grep -c . || true)"; shas="$(printf '%s\n' "$past" | cut -c1-7 | tr '\n' ' ' | sed 's/ $//')"
+      if [ -n "$local_only" ]; then why="they exist only on this machine (unpushed local commits) — push or drop them, then re-run /brain-update-check"
+      else why="they are already on $BASE_REMOTE/$BRANCH: another server's apply moved this shared checkout — re-run /brain-update-check for an offer that covers them"; fi
+      msg="HEAD is $n commit(s) past the approved ${PIN:0:7} touching $SUB ($shas); $why. Nothing built."
+      log "held: $msg"
+      [ -z "${MCP_APPLY_VERDICT:-}" ] || printf '%s\n' "$msg" > "$MCP_APPLY_VERDICT"
+      exit 75
+    fi
+    log "HEAD is past the approved ${PIN:0:7} only outside $SUB — building $SUB at the approved source"
+  fi
   build_last_good "$PKG" "$CDIR" "${MCP_CHECKOUT_BUILD_CMD:-install_deps \"$CDIR\" && npm run build && npm run test --if-present}"
   exit 0
 fi
@@ -228,7 +291,7 @@ UNSUP="$(mcp_fork_unsupported "$LAUNCHER")"
 # --- preconditions ----------------------------------------------------------
 [ -d "$DIR/.git" ] || die "$DIR is not a git repo"
 take_lock "$DIR"
-after_lock "$DIR"
+after_lock "$DIR" fork
 # hand-managed = has the fork remote (use count, not grep -qv: BSD grep quirk)
 [ "$(git -C "$DIR" remote | grep -c "^${FORK_REMOTE}$" || true)" -gt 0 ] \
   || die "$NAME has no '$FORK_REMOTE' remote — not a hand-managed fork checkout; nothing to do"
@@ -253,9 +316,26 @@ git -C "$DIR" rev-parse --verify --quiet "$BASE_REF" >/dev/null \
 # local-build, where they build cleanly and change behaviour with nothing
 # prompting anyone to notice. Narrow-by-default is the safety property — a
 # branch ships only because someone deliberately named it into the namespace.
-branches=()
-while IFS= read -r b; do [ -n "$b" ] && branches+=("$b"); done \
-  < <(git -C "$DIR" for-each-ref --format='%(refname:short)' "refs/remotes/$FORK_REMOTE/feat")
+# What to build, by sha: the approved pin, or (unpinned) one snapshot of what is live now.
+branches=(); tips=()
+if [ -n "$PIN" ]; then
+  base_sha="${PIN%%,*}"; base_sha="${base_sha#main=}"; rest="${PIN#*,}"; [ "$rest" != "$PIN" ] || rest=""
+  while [ -n "$rest" ]; do
+    e="${rest%%,*}"; branches+=("$FORK_REMOTE/${e%=*}"); tips+=("${e##*=}")
+    [ "$rest" != "${rest#*,}" ] && rest="${rest#*,}" || rest=""
+  done
+  for s in "$base_sha" ${tips[@]+"${tips[@]}"}; do
+    git -C "$DIR" cat-file -e "$s^{commit}" 2>/dev/null \
+      || die "$NAME: the approved commit $s is not in $DIR after the fetch (force-pushed away, or a mistyped pin) — nothing built"
+  done
+  log "building exactly the approved composition: $BASE_REF ${base_sha:0:7}${branches[*]+ + ${branches[*]}}"
+else
+  listing="$(mcp_fork_pin_listing "$DIR" "$BASE_REF" "$FORK_REMOTE")" \
+    || die "could not read $BASE_REF and the $FORK_REMOTE/feat/* tips"
+  base_sha="$(printf '%s\n' "$listing" | awk 'NR==1{print $2}')"
+  while read -r b s; do [ -n "$b" ] && { branches+=("$b"); tips+=("$s"); }; done \
+    < <(printf '%s\n' "$listing" | awk 'NR>1')
+fi
 if [ "${#branches[@]}" -eq 0 ]; then
   log "WARNING: no $FORK_REMOTE/feat/* branches found — local-build will just mirror $BASE_REF"
 else
@@ -284,7 +364,7 @@ fi
 # would also flag the engine's merge commits and a since-deleted feat/*'s
 # commits — dropping those is the point of rebuilding.)
 if git -C "$DIR" rev-parse -q --verify refs/heads/local-build >/dev/null; then
-  hand="$(git -C "$DIR" rev-list --first-parent --no-merges local-build --not "$BASE_REF" ${branches[@]+"${branches[@]}"})" \
+  hand="$(git -C "$DIR" rev-list --first-parent --no-merges local-build --not "$base_sha" ${tips[@]+"${tips[@]}"})" \
     || die "could not list local-build commits outside $BASE_REF + $FORK_REMOTE/feat/*"
   if [ -n "$hand" ]; then
     die "local-build has $(printf '%s\n' "$hand" | wc -l | tr -d ' ') commit(s) in neither $BASE_REF nor any $FORK_REMOTE/feat/* ($(printf '%s\n' "$hand" | cut -c1-7 | tr '\n' ' ' | sed 's/ $//')) — rebuilding would drop them; push them to $FORK_REMOTE/feat/<slug>, then re-run"
@@ -303,16 +383,18 @@ esac
 prev_head="$(git -C "$DIR" symbolic-ref -q HEAD || git -C "$DIR" rev-parse HEAD)"
 # dist/ is build output, never merged: a feat/* tracking files there would overwrite the
 # last-good dist mid-rebuild (and a failed merge's restore would then delete them).
-for b in ${branches[@]+"${branches[@]}"}; do
-  dp="$(git -C "$DIR" diff --name-only "$BASE_REF...$b" -- dist/)" || die "could not diff $b against $BASE_REF"
+i=0
+while [ "$i" -lt "${#branches[@]}" ]; do
+  b="${branches[$i]}"; i=$((i+1))
+  dp="$(git -C "$DIR" diff --name-only "$base_sha...${tips[$((i-1))]}" -- dist/)" || die "could not diff $b against $BASE_REF"
   [ -z "$dp" ] || die "$b changes dist/ ($(printf '%s' "$dp" | tr '\n' ' ' | sed 's/ $//')) — dist/ is build output; remove it from that feature branch, then re-run"
 done
-# merge_failed <branch> <git output> : abort the merge, restore local-build + HEAD, then
+# merge_failed <branch> <git output> <branch-sha> : abort the merge, restore local-build + HEAD, then
 # die. A conflict names <branch>, the base and/or already-merged branches touching the
 # conflicted files, and those files; any other failure relays git's own output.
 # Each restore step that fails dies with its manual remedy.
 merge_failed(){
-  local b="$1" out="$2" f m with="" files=() was="its prior absence"
+  local b="$1" out="$2" bsha="$3" f m j=0 with="" files=() was="its prior absence"
   while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done \
     < <(git -C "$DIR" diff --name-only --diff-filter=U)
   if git -C "$DIR" rev-parse -q --verify MERGE_HEAD >/dev/null; then
@@ -337,20 +419,25 @@ merge_failed(){
   [ "${#files[@]}" -gt 0 ] \
     || die "merging $b failed (not a conflict) — merge aborted, local-build restored to $was; git said: $(printf '%s' "$out" | tr '\n' ' ')"
   printf '%s\n' "$out" >&2
-  git -C "$DIR" --literal-pathspecs diff --quiet "$b...$BASE_REF" -- "${files[@]}" || with="$BASE_REF"
-  for m in ${merged[@]+"${merged[@]}"}; do
-    git -C "$DIR" --literal-pathspecs diff --quiet "$BASE_REF...$m" -- "${files[@]}" || with="$with${with:+, }$m"
+  git -C "$DIR" --literal-pathspecs diff --quiet "$bsha...$base_sha" -- "${files[@]}" || with="$BASE_REF"
+  while [ "$j" -lt "${#merged[@]}" ]; do
+    m="${merged[$j]}"
+    git -C "$DIR" --literal-pathspecs diff --quiet "$base_sha...${merged_tips[$j]}" -- "${files[@]}" || with="$with${with:+, }$m"
+    j=$((j+1))
   done
   die "merge conflict integrating $b with ${with:-$BASE_REF} (conflicted: ${files[*]}) — merge aborted, local-build restored to $was; resolve it in that feature branch (never hand-edit local-build), then re-run"
 }
 log "rebuilding local-build from $BASE_REF ..."
-git -C "$DIR" checkout -q -B local-build "$BASE_REF"
-merged=()
-for b in ${branches[@]+"${branches[@]}"}; do
-  log "  merge $b"
-  out="$(git -C "$DIR" merge --no-ff --no-edit "$b" 2>&1)" || merge_failed "$b" "$out"
+git -C "$DIR" checkout -q -B local-build "$base_sha"
+merged=(); merged_tips=()
+i=0
+while [ "$i" -lt "${#branches[@]}" ]; do
+  b="${branches[$i]}"; s="${tips[$i]}"; i=$((i+1))
+  log "  merge $b (${s:0:7})"
+  # by sha (the verified snapshot), with the message a merge by name would have had
+  out="$(git -C "$DIR" merge --no-ff --no-edit -m "Merge remote-tracking branch '$b' into local-build" "$s" 2>&1)" || merge_failed "$b" "$out" "$s"
   printf '%s\n' "$out"
-  merged+=("$b")
+  merged+=("$b"); merged_tips+=("$s")
 done
 
 # --- build with last-good protection ----------------------------------------
