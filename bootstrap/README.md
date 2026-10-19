@@ -34,7 +34,7 @@ What each step does:
 
 Because the shared layer is factored into `minimal-init.sh`, a separate tool that wants the MCPs *without* the vault can shallow-clone this repo, run `minimal-init.sh`, vendor the `add-*.sh` scripts it needs, and stop.
 
-A third boundary sits below both: the **MCP servers** (`davidianstyle/google-mcp`, `asana-mcp`, …) are separate repos. The launchers in `~/.config/openbrain/lib/` clone them to `~/<name>`, build them on demand (`ensure_mcp_server`), and `exec` them. The shared layer holds credentials + launchers; the servers live in their own repos.
+A third boundary sits below both: the **MCP servers** (`davidianstyle/google-mcp`, `asana-mcp`, …) are separate repos. The launchers in `~/.config/openbrain/lib/` clone them under the configured source root (`root=` in `~/.config/openbrain/mcp-config`, default `~/Code`), build them on demand (`ensure_mcp_server`), and `exec` them. The shared layer holds credentials + launchers; the servers live in their own repos.
 
 ## Lifecycle scripts
 
@@ -52,6 +52,8 @@ One-time setup of the Google OAuth client. Stores `GOOGLE_OAUTH_CLIENT_ID` and `
 - **Creating a new app** — answer **no**, and the script walks you through the one-time Google Cloud Console steps (enable the 6 APIs, configure the consent screen, create a Desktop client ID), then prompts for the two values it generates.
 
 Re-run to rotate the client credentials.
+
+Each of `add-google-account.sh`, `add-asana.sh`, `add-slack-workspace.sh`, and `add-fathom.sh` calls `ensure_mcp_server <name>` first, which clones and builds that MCP's source (from its `.openbrain/lib/<name>-mcp.sh` declaration) into the configured source root if it isn't already there — `root=` in `~/.config/openbrain/mcp-config`, default `~/Code`. This is the same install path the launcher itself uses on a lazy first start; `add-*.sh` just runs it up front so a build failure surfaces in the terminal before OAuth, not silently inside MCP startup.
 
 ### `add-google-account.sh <email>`
 
@@ -186,6 +188,10 @@ If a specific server stays red:
 1. Run the launcher manually to see the error: `~/.config/openbrain/lib/gmail-mcp.sh <slug>`
 2. Check that the token file(s) exist at the expected path
 3. Re-run `add-google-account.sh <email>` to refresh credentials
+
+### A launcher exits immediately, or the update check says `undeclared` / `cannot-check`
+
+Every `*-mcp.sh` launcher needs one `# openbrain-mcp: shape=…` declaration line. An `undeclared` installed launcher right after a pull usually means the runtime wasn't redeployed: run `bash .openbrain/lib/reconcile-runtime.sh --apply` from the vault — never edit the installed copy in `~/.config/openbrain/lib/`, which the next redeploy overwrites. If the vault's own launcher lacks the line, add it there (grammar: `.openbrain/lib/_mcp-decl.sh`), then redeploy. A launcher also refuses to start on an invalid value in `~/.config/openbrain/mcp-config` (for example a misspelled channel, an update mode other than `auto`/`ask`, or a line not written as `key=value`, such as `root: /x`; an inline `# comment` after whitespace is fine) — fix the value and restart Claude Code. `bash .openbrain/lib/check-updates.sh --check` prints a one-line summary (nothing when clean); `--report` prints the full report with each finding's fix.
 
 ### "npx not found" when a launcher runs
 
